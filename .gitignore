@@ -1,0 +1,20 @@
+# example runs and driver state
+/work/
+/wfull/
+/.submit/
+# build products
+*.o
+*.a
+*.mod
+build.log
+programs/fk3.2/fk
+programs/fk3.2/syn
+programs/fk3.2/st_fk
+programs/fk3.2/trav
+programs/fk3.2/sachd
+programs/mtel3/mtel3
+programs/mtel3/rayinformation
+programs/select/snr
+programs/code_SubMIT/finv
+programs/fwd_SubMIT/ffwd
+__pycache__/

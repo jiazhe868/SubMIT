@@ -1,0 +1,10 @@
+n  best_misfit  source
+1  5.5472  hybrid-snapshot
+2  4.6327  hybrid-snapshot
+3  3.8535  hybrid-snapshot
+4  3.5992  hybrid-snapshot
+5  3.2028  hybrid-snapshot
+6  3.0719  hybrid-snapshot
+7  2.9938  hybrid-snapshot
+grid minimum 2.9938; 5% band <= 3.1435
+SUGGESTED number of subevents (elbow): 6

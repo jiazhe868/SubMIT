@@ -1,0 +1,21 @@
+group = "edu.sc.seis"
+version = "2.0_localMod"
+sourceCompatibility = 1.5
+
+apply plugin: 'java'
+apply plugin: 'eclipse'
+
+repositories {
+    flatDir name: 'localRepository', dirs: 'lib'
+    mavenRepo urls: "http://www.seis.sc.edu/software/maven2"
+    mavenCentral()
+}
+defaultTasks "clean", "jar"
+
+dependencies {
+        compile "org.slf4j:slf4j-log4j12:1.6.1"
+        compile "edu.sc.seis:seisFile:1.2"
+        compile "org.python:jython-standalone:2.5.2"
+        testCompile "junit:junit:4.8.1"
+
+}

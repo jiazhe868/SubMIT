@@ -1,0 +1,18 @@
+# conda env create -f environment.yml && conda activate submit
+# Versions in comments are the ones the examples were validated with.
+name: submit
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12        # 3.12.2
+  - numpy<2            # 1.26.4
+  - scipy              # 1.13.1
+  - pandas             # 2.2.2
+  - matplotlib         # 3.8.4
+  - obspy              # 1.4.1
+  - requests           # 2.32.5
+  - cartopy            # 0.23.0
+  # MPI + compilers from conda-forge, if your system has none:
+  # - openmpi
+  # - gfortran
+  # - c-compiler

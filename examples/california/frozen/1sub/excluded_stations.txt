@@ -1,0 +1,23 @@
+SNR P-disp data/CU.GRGR.00.z snr=4.8 < 5.5
+SNR P-disp data/II.ERM.00.z snr=4.2 < 5.5
+SNR P-disp data/IU.TARA.00.z snr=4.2 < 5.5
+SNR P-disp data/II.KWJN.00.z snr=4.9 < 5.5
+SNR SH data/IU.LCO.00.t snr=4.9 < 5.5
+SNR SH data/II.KWJN.00.t snr=4.5 < 5.5
+SNR SH data/IU.SAML.00.t snr=1.4 < 5.5
+SNR SH data/G.DZM.00.t snr=5.3 < 5.5
+SNR SH data/PS.PATS..t snr=5.3 < 5.5
+SNR SH data/CU.BCIP.00.t snr=3.0 < 5.5
+LOC dataloc/NC.KBU.01.n log10amp=-0.79 median=-1.79 (x9.92 of median)
+LOC dataloc/NC.KPPB.01.n log10amp=-0.86 median=-1.79 (x8.43 of median)
+LOC dataloc/NC.KSM.03.n log10amp=-0.79 median=-1.79 (x9.89 of median)
+pair    dataloc/NC.KPPB.01.e (component of excluded station)
+pair    dataloc/NC.KPPB.01.z (component of excluded station)
+pair    dataloc/NC.KBU.01.e (component of excluded station)
+pair    dataloc/NC.KBU.01.z (component of excluded station)
+pair    dataloc/NC.KSM.03.e (component of excluded station)
+pair    dataloc/NC.KSM.03.z (component of excluded station)
+pair    data/vel_IU.TARA.00.z (companion of excluded data/IU.TARA.00.z)
+pair    data/vel_II.ERM.00.z (companion of excluded data/II.ERM.00.z)
+pair    data/vel_CU.GRGR.00.z (companion of excluded data/CU.GRGR.00.z)
+pair    data/vel_II.KWJN.00.z (companion of excluded data/II.KWJN.00.z)

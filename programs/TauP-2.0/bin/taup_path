@@ -1,0 +1,39 @@
+#!/bin/bash
+
+if [ -z "${JAVA}" ] ; then
+JAVA=java 
+fi
+PRG=$0
+saveddir=`pwd`
+
+# need this for relative symlinks
+PRGDIR=`dirname "$PRG"`
+
+TAUP_HOME="$PRGDIR/.."
+
+# make it fully qualified
+TAUP_HOME=`cd "${TAUP_HOME}" && pwd`
+
+cd "$saveddir"
+
+#Jacorb-2.3.0 does bad things with a popular default LANG value, en_US.UTF-8
+unset LANG
+
+LIB=${TAUP_HOME}/lib
+
+TAUP=$LIB/TauP-2.0.jar
+SLF4JLOG4J12=$LIB/slf4j-log4j12-1.6.1.jar
+SEISFILE=$LIB/seisFile-1.2.jar
+JYTHONSTANDALONE=$LIB/jython-standalone-2.5.2.jar
+SLF4JAPI=$LIB/slf4j-api-1.6.1.jar
+LOG4J=$LIB/log4j-1.2.16.jar
+STAXAPI=$LIB/stax-api-1.0-2.jar
+WOODSTOXCORELGPL=$LIB/woodstox-core-lgpl-4.1.0.jar
+STAX2API=$LIB/stax2-api-3.1.0.jar
+
+
+CLASSPATH=${TAUP}:${SLF4JLOG4J12}:${SEISFILE}:${JYTHONSTANDALONE}:${SLF4JAPI}:${LOG4J}:${STAXAPI}:${WOODSTOXCORELGPL}:${STAX2API}
+
+$JAVA -classpath $CLASSPATH \
+     -Xmx512m -XX:+HeapDumpOnOutOfMemoryError  \
+    edu.sc.seis.TauP.TauP_Path   "$@" 

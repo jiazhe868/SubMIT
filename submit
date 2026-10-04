@@ -1,0 +1,321 @@
+#!/bin/bash
+# SubMIT command-line driver.
+#
+#   ./submit check                         check that every dependency is installed
+#   ./submit build                         compile the bundled Green's-function codes
+#   ./submit list                          list the bundled example earthquakes
+#   ./submit example NAME [options]        reproduce an example (see below)
+#   ./submit status NAME                   show progress of an example run
+#   ./submit compare NAME                  compare a finished run with the published result
+#   ./submit prepare DIR                   step 1 for your own earthquake (Wilber tar files
+#                                          in DIR/IRIS and DIR/IRISloc)
+#   ./submit run DIR [--quick] [--nmax N]  steps 2-4 for your own earthquake
+#
+# Example modes (--mode):
+#   figures  (default) rebuild Green's functions, then regenerate every figure
+#            from the published best models          ~0.5-1.5 h
+#   frozen   re-run the MCMC inversions with the exact published configuration
+#            files, then select the number of subevents and make figures
+#                                                    ~1-14 h on 32 cores
+#   full     run the whole automated pipeline from the processed waveforms
+#            (screening, weighting, priors, inversions, selection, figures)
+#                                                    ~1.5-16 h on 32 cores
+# Other options:
+#   --quick         very short Markov chains (smoke test of the machinery only;
+#                   the numbers are NOT meaningful)
+#   --nmax N        largest number of subevents to try in --mode frozen/full
+#   --workdir DIR   where to create the run (default: ./work; keep the path
+#                   short - SAC cannot read file names longer than ~120 characters)
+#   --live-catalog  (full mode) query USGS for the aftershock catalog and moment
+#                   tensor instead of replaying the archived copies
+#   --gnu           build with GNU mpicc/mpif90 even if Intel oneAPI is installed
+set -e
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROG="$REPO/programs"
+EX="$REPO/examples"
+
+say()  { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
+die()  { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------- environment
+setup_env() {
+    # the pipeline calls "python"; point it at the chosen interpreter
+    local py=${SUBMIT_PYTHON:-$(command -v python3 || command -v python || true)}
+    [ -n "$py" ] || die "no python3 found (create the conda env: conda env create -f environment.yml)"
+    mkdir -p "$REPO/.submit/bin"
+    ln -sfn "$py" "$REPO/.submit/bin/python"
+    export SUBMIT_PYTHON="$py"
+    # bundled tools first: fk.pl calls fk/sachd by name, steps call taup
+    export PATH="$REPO/.submit/bin:$PROG/fk3.2:$PROG/TauP-2.0/bin:$PATH"
+    [ "${SUBMIT_GNU:-0}" = "1" ] && export SUBMIT_NO_INTEL=1 MPICC=mpicc MPIFC=mpif90
+    return 0
+}
+
+# ---------------------------------------------------------------- check
+cmd_check() {
+    setup_env
+    local bad=0
+    ok()   { printf '  \033[32mok\033[0m      %s\n' "$*"; }
+    miss() { printf '  \033[31mMISSING\033[0m %s\n' "$*"; bad=1; }
+    say "command-line tools"
+    for t in sac saclst gawk perl gcc gfortran java mpirun; do
+        command -v $t > /dev/null && ok "$t ($(command -v $t))" || miss "$t"
+    done
+    if command -v mpiicx > /dev/null || command -v mpiicc > /dev/null; then ok "Intel MPI compilers"
+    elif command -v mpicc > /dev/null && { command -v mpif90 > /dev/null || command -v mpifort > /dev/null; }; then ok "GNU MPI compilers (mpicc/mpif90)"
+    else miss "MPI compilers (mpicc + mpif90, or Intel mpiicx + mpiifx)"; fi
+    say "SAC library"
+    local sh=${SACHOME:-$(command -v sac > /dev/null && dirname "$(dirname "$(command -v sac)")")}
+    if [ -n "$sh" ] && [ -f "$sh/lib/libsac.a" ] && [ -f "$sh/lib/libsacio.a" ]; then ok "SACHOME=$sh"
+    else miss "libsac.a / libsacio.a (install SAC from IRIS and put sac on PATH)"; fi
+    [ -n "$SACAUX" ] && ok "SACAUX=$SACAUX" || miss "SACAUX environment variable (set it as in the SAC install notes)"
+    say "python ($SUBMIT_PYTHON)"
+    for m in numpy scipy pandas matplotlib obspy requests cartopy; do
+        "$SUBMIT_PYTHON" -c "import $m" 2>/dev/null && ok "$m" || miss "python package $m"
+    done
+    say "bundled codes"
+    for b in fk3.2/fk fk3.2/sachd mtel3/mtel3 mtel3/rayinformation; do
+        [ -x "$PROG/$b" ] && ok "$b" || miss "$b (run ./submit build)"
+    done
+    echo "h
+100
+60
+q" | "$PROG/TauP-2.0/bin/taup_time" -mod iasp91 2>/dev/null | grep -q " P " && ok "TauP (taup_time)" || miss "TauP: taup_time did not run (needs java)"
+    echo
+    [ $bad -eq 0 ] && echo "All dependencies found." || { echo "Some dependencies are missing - see README 'Installation'."; return 1; }
+}
+
+# ---------------------------------------------------------------- build
+cmd_build() {
+    setup_env
+    say "fk (local Green's functions)"
+    (cd "$PROG/fk3.2" && make > build.log 2>&1) || die "fk build failed, see programs/fk3.2/build.log"
+    say "mtel3 (teleseismic Green's functions)"
+    (cd "$PROG/mtel3" && make > build.log 2>&1) || die "mtel3 build failed, see programs/mtel3/build.log"
+    say "snr (step-1 signal-to-noise tool)"
+    (cd "$PROG/select/signal_noise_ratio" && make > build.log 2>&1) || echo "  (optional) snr build failed - only needed for step 1 on new events"
+    chmod +x "$PROG"/TauP-2.0/bin/* "$PROG"/fk3.2/*.pl 2>/dev/null || true
+    say "test-compile the inversion code"
+    local t; t=$(mktemp -d "$REPO/.submit/buildtest.XXXX")
+    cp -r "$PROG/code_SubMIT/." "$t/"
+    (cd "$t" && make > build.log 2>&1) || { cat "$t/build.log" | tail -20; die "inversion code did not compile (log above)"; }
+    rm -rf "$t"
+    echo "Build OK. The inversion/forward codes themselves are compiled inside each run directory."
+}
+
+# ---------------------------------------------------------------- examples
+cmd_list() {
+    printf '%-12s %-48s %s\n' NAME EVENT "SELECTED SUBEVENTS"
+    for d in "$EX"/*/; do
+        local n; n=$(basename "$d"); [ -f "$d/event_list.dat" ] || continue
+        printf '%-12s %-48s %s\n' "$n" "$(awk '{print $1}' "$d/event_list.dat")" "$(cat "$d/selected_n")"
+    done
+}
+
+# one inversion directory from the frozen configuration of subevent count N
+make_frozen_inv() {
+    local ev=$1 n=$2 fz=$3
+    local d="inv_${ev}_${n}sub"
+    rm -rf "$d"
+    cp -r ../programs/code_SubMIT "$d"
+    cp -r "_integrated/data" "$d/data"
+    cp -r "../IRISloc/${ev}_loc/data" "$d/dataloc"
+    cp "$fz/${n}sub/"* "$d/"
+    rm -f "$d/samples.tar.gz"
+}
+
+set_short_chains() {   # --quick: tiny chains, for testing the machinery only
+    for d in inv_*sub; do
+        [ -f "$d/search_par.file" ] || continue
+        sed -i 's/^burn_in .*/burn_in 150/; s/^nsample .*/nsample 100/' "$d/search_par.file"
+    done
+}
+
+build_gfs() {
+    local ev=$1
+    # frozen/figures: rebuild the published run's Green's functions exactly
+    # (its velocity models and grid); full mode derives them with current rules
+    [ -n "$2" ] && [ -f "$2/distdep.dat" ] && export SUBMIT_GF_INPUTS="$2"
+    say "Green's functions for $ev (the long preparation stage)"
+    rm -rf "gf_$ev"
+    cp -r ../programs/gf_SubMIT "gf_$ev"
+    (cd "gf_$ev/loc" && sh doloc.sh > ../doloc.log 2>&1) || die "local Green's functions failed (IRIS/gf_$ev/doloc.log)"
+    (cd "gf_$ev" && sh dotel.sh > dotel.log 2>&1) || die "teleseismic Green's functions failed (IRIS/gf_$ev/dotel.log)"
+    find "gf_$ev/greenFuncDir_disp" -maxdepth 2 -name "*.grn.*" -print -quit | grep -q . \
+        || die "no Green's functions were produced (see IRIS/gf_$ev/*.log)"
+}
+
+lcurve() { python ../programs/prepare_SubMIT/plot_lcurve.py | tee lcurve.log; }
+elbow()  { awk '/SUGGESTED/{print $NF}' lcurve.txt; }
+
+# clone inv_(n-1) into inv_n for a grid extension (same configuration, one more subevent)
+extend_grid() {
+    local ev=$1 n=$2 p=$(( $2 - 1 ))
+    local s="inv_${ev}_${p}sub" t="inv_${ev}_${n}sub"
+    rm -rf "$t"; cp -r "$s" "$t"
+    (cd "$t" && rm -f ./*best.dat best_model_* ./*chain.dat mpi.out allsamples.dat pooled_ensemble.dat ./*.o finv \
+        && sed -i "s/^num_subevent= *[0-9]*/num_subevent= $n/" Par.file \
+        && sed -i "s/^neq_min .*/neq_min $n/; s/^neq_max .*/neq_max $n/" search_par.file \
+        && awk -v want=$n '{print; last=$0} END{for(i=NR+1;i<=want;i++) print last}' Input.model > Input.model.new \
+        && mv Input.model.new Input.model)
+}
+
+# steps 2-3 + automatic grid extension, in the current IRIS/ directory
+run_pipeline() {
+    local quick=$1 nmax=$2 n ev
+    say "step 2: screening, Green's functions, priors, configuration"
+    bash ../programs/step2_prepare_inversions.sh
+    ev=$(awk '{print $1; exit}' event_list.dat)
+    [ "$quick" -eq 1 ] && set_short_chains
+    say "step 3: Bayesian inversions for 1-5 subevents (1-subevent calibration hooks included)"
+    bash ../programs/step3_do_inversions.sh
+    [ "$quick" -eq 1 ] && set_short_chains
+    lcurve
+    n=$(ls -d inv_${ev}_*sub | sed 's/.*_\([0-9]*\)sub/\1/' | sort -n | tail -1)
+    while [ "$(elbow)" = "$n" ] && [ "$n" -lt "$nmax" ]; do
+        n=$(( n + 1 ))
+        say "selection is at the edge of the grid - extending to $n subevents"
+        extend_grid "$ev" $n
+        bash ../programs/step3_do_inversions_tempnsub.sh $n
+        lcurve
+    done
+}
+
+cmd_prepare() {
+    local D; D=$(cd "${1:?usage: ./submit prepare DIR}" && pwd)
+    setup_env
+    ln -sfn "$PROG" "$D/programs"
+    [ -d "$D/IRIS" ] || die "$D/IRIS not found (put the teleseismic Wilber .tar files there)"
+    say "step 1: teleseismic records"
+    (cd "$D/IRIS" && sh ../programs/step1_1_process_tel.sh)
+    if [ -d "$D/IRISloc" ]; then
+        say "step 1: regional records"
+        (cd "$D/IRISloc" && sh ../programs/step1_2_process_loc.sh)
+    fi
+    echo "Next: ./submit run $1"
+}
+
+cmd_run() {
+    local D; D=$(cd "${1:?usage: ./submit run DIR [--quick] [--nmax N]}" && pwd); shift
+    local quick=0 nmax=8
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --quick) quick=1 ;;
+            --nmax) nmax=$2; shift ;;
+            --gnu) export SUBMIT_GNU=1 ;;
+            *) die "unknown option $1" ;;
+        esac; shift
+    done
+    setup_env
+    ln -sfn "$PROG" "$D/programs"
+    cd "$D/IRIS"
+    exec > >(tee -a "$D/submit.log") 2>&1
+    echo "started $(date)  repo=$REPO"
+    export SUBMIT_RESEED=2
+    run_pipeline "$quick" "$nmax"
+    local nsel; nsel=$(elbow)
+    say "step 4: forward model + figures for the selected $nsel-subevent model"
+    bash ../programs/step4_fwd_tempnsub.sh "$nsel"
+    echo "Figures and a results summary are in: $D/IRIS/figs_and_results/"
+}
+
+cmd_example() {
+    local name=$1; shift || true
+    [ -n "$name" ] && [ -d "$EX/$name" ] || { cmd_list; die "unknown example '$name'"; }
+    local mode=figures quick=0 nmax="" workdir="$REPO/work" live=0
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --mode) mode=$2; shift ;;
+            --quick) quick=1 ;;
+            --nmax) nmax=$2; shift ;;
+            --workdir) workdir=$2; shift ;;
+            --live-catalog) live=1 ;;
+            --gnu) export SUBMIT_GNU=1 ;;
+            *) die "unknown option $1" ;;
+        esac; shift
+    done
+    case $mode in figures|frozen|full) ;; *) die "--mode must be figures, frozen or full" ;; esac
+    setup_env
+    local fz="$EX/$name/frozen" ev nsel W
+    ev=$(awk '{print $1}' "$EX/$name/event_list.dat")
+    nsel=$(cat "$EX/$name/selected_n")
+    W="$workdir/$name"
+    [ ${#W} -lt 100 ] || echo "WARNING: work path is long (${#W} chars); SAC may fail on long file names - use --workdir with a shorter path"
+
+    say "setting up $W (mode: $mode)"
+    rm -rf "$W"; mkdir -p "$W"
+    ln -sfn "$PROG" "$W/programs"
+    tar xzf "$EX/$name/inputs.tar.gz" -C "$W"
+    cd "$W/IRIS"
+    exec > >(tee -a "$W/submit.log") 2>&1
+    echo "started $(date)  repo=$REPO  mode=$mode quick=$quick"
+    export SUBMIT_RESEED=2
+
+    if [ "$mode" = full ]; then
+        [ $live -eq 1 ] || export SUBMIT_CATALOG_CACHE="$EX/$name/catalog"
+        run_pipeline "$quick" "${nmax:-8}"
+        nsel=$(elbow)
+    else
+        cp "$EX/$name/event_list.dat" .
+        say "integrating teleseismic records to displacement"
+        mkdir -p _integrated && cp -r "$ev/data" _integrated/data
+        sh ../programs/prepare_SubMIT/process_tel_comp.sh _integrated > /dev/null
+        local ns; ns=$(ls "$fz" | sed 's/sub$//' | sort -n)
+        [ -n "$nmax" ] && ns=$(for n in $ns; do [ "$n" -le "$nmax" ] && echo $n; done)
+        for n in $ns; do make_frozen_inv "$ev" "$n" "$fz"; done
+        # the forward-model template is the 1-subevent directory without results
+        rm -rf "fwd_$ev"; cp -r "inv_${ev}_1sub" "fwd_$ev"
+        rm -f "fwd_$ev"/best_model_* "fwd_$ev"/misfit.dat
+        build_gfs "$ev" "$EX/$name/gf_inputs"
+        if [ "$mode" = frozen ]; then
+            [ $quick -eq 1 ] && set_short_chains
+            for n in $ns; do
+                say "inversion with $n subevent(s)"
+                rm -f "inv_${ev}_${n}sub/best_model_hybrid.dat" "inv_${ev}_${n}sub/misfit.dat"
+                bash ../programs/step3_do_inversions_tempnsub.sh $n
+            done
+            lcurve
+            nsel=$(elbow)
+        else
+            tar xzf "$fz/${nsel}sub/samples.tar.gz" -C "inv_${ev}_${nsel}sub"
+            lcurve
+        fi
+    fi
+
+    say "step 4: forward model + figures for the selected $nsel-subevent model"
+    bash ../programs/step4_fwd_tempnsub.sh "$nsel"
+    say "done"
+    echo "Figures and a results summary are in: $W/IRIS/figs_and_results/"
+    echo "Compare with the published result:    ./submit compare $name"
+}
+
+cmd_status() {
+    local name=$1 W="${2:-$REPO/work}/$1"
+    [ -d "$W/IRIS" ] || die "no run found at $W"
+    cd "$W/IRIS"
+    for d in inv_*sub; do
+        [ -d "$d" ] || continue
+        if [ -f "$d/best_model_hybrid.dat" ]; then printf '%-8s done, best misfit %s\n' "${d##*_}" "$(awk '{print $3}' "$d/best_model_hybrid.dat")"
+        elif [ -f "$d/mpi.out" ]; then printf '%-8s running (%s)\n' "${d##*_}" "$(grep -c . "$d/mpi.out") log lines"
+        else printf '%-8s waiting\n' "${d##*_}"; fi
+    done
+    tail -3 "$W/submit.log" 2>/dev/null
+}
+
+cmd_compare() {
+    setup_env
+    local name=$1 W="${2:-$REPO/work}/$1"
+    "$SUBMIT_PYTHON" "$REPO/tools/compare_with_reference.py" "$EX/$name" "$W/IRIS"
+}
+
+case ${1:-help} in
+    check)   cmd_check ;;
+    build)   cmd_build ;;
+    list)    cmd_list ;;
+    example) shift; cmd_example "$@" ;;
+    status)  shift; cmd_status "$@" ;;
+    compare) shift; cmd_compare "$@" ;;
+    prepare) shift; cmd_prepare "$@" ;;
+    run)     shift; cmd_run "$@" ;;
+    *)       sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac

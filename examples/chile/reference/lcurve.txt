@@ -1,0 +1,13 @@
+n  best_misfit  source
+1  1.4185  hybrid-snapshot
+2  1.1543  hybrid-snapshot
+3  0.9175  hybrid-snapshot
+4  0.8685  hybrid-snapshot
+5  0.8803  hybrid-snapshot
+6  0.8927  hybrid-snapshot
+7  1.0115  hybrid-snapshot
+NOTE: penalized misfit rises 4sub->5sub (0.8685->0.8803) - expected when the stress/CLVD penalties reject extra subevents; suspect non-convergence only if the DATA misfit also rises
+NOTE: penalized misfit rises 5sub->6sub (0.8803->0.8927) - expected when the stress/CLVD penalties reject extra subevents; suspect non-convergence only if the DATA misfit also rises
+NOTE: penalized misfit rises 6sub->7sub (0.8927->1.0115) - expected when the stress/CLVD penalties reject extra subevents; suspect non-convergence only if the DATA misfit also rises
+grid minimum 0.8685; 5% band <= 0.9119
+SUGGESTED number of subevents (elbow): 4
