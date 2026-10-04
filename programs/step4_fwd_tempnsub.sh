@@ -97,6 +97,7 @@ while read -r event_id rest; do
     else
         "$PYEXE" plot_waveform_fits_mpl.py || echo "WARNING: waveform-fit plates failed"
         "$PYEXE" plot_subevent_map_mpl.py || echo "WARNING: subevent figure failed"
+        "$PYEXE" plot_station_map_mpl.py || echo "WARNING: station map failed"
         cd ../
     fi
 
@@ -142,6 +143,7 @@ while read -r event_id rest; do
     out="figs_and_results"
     mkdir -p "$out"
     cp "$fdir"/fits_*.pdf "$fdir"/subevents.pdf "$fdir"/subevents.png "$out"/ 2>/dev/null
+    cp "$fdir"/stations.png "$fdir"/stations.pdf "$out"/ 2>/dev/null
     cp "inv_${event_id}_${nn}sub/histoplot_py.pdf" \
        "inv_${event_id}_${nn}sub/misfit_evolution.pdf" "$out"/ 2>/dev/null
     cp lcurve.pdf lcurve.txt "$out"/ 2>/dev/null

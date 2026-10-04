@@ -6,9 +6,22 @@ subevents that best explain hundreds of seismograms recorded around the world an
 **estimates their uncertainties with Markov-chain Monte Carlo (MCMC)**, and **chooses how many
 subevents the data actually support**.
 
-This version is a fully automated pipeline: starting from downloaded waveforms it screens the
-data, computes Green's functions, builds the priors, runs the inversions for 1, 2, 3, … subevents,
-selects the number of subevents and produces publication-style figures — with no hand tuning.
+> **A fully automated pipeline.** One command takes downloaded waveforms all the way to final
+> figures, with no manual tuning:
+>
+> * **data screening** — broken, mis-scaled or flipped stations are found and removed automatically;
+> * **configuration** — time windows, frequency bands, search ranges, wave-type weights and the
+>   aftershock-based location prior are derived from the event and the data themselves;
+> * **inversion** — Bayesian MCMC for 1, 2, 3, … subevents, each with uncertainties;
+> * **model selection** — the number of subevents is chosen by a fixed rule, and the search is
+>   extended automatically when needed;
+> * **results** — maps, moment-rate functions, posterior histograms, waveform fits, station maps
+>   and a written summary.
+>
+> ```bash
+> ./submit prepare /data/myevent && ./submit run /data/myevent
+> ```
+
 Four validated example earthquakes are included, and each can be reproduced with one command.
 
 The method was introduced and applied in Jia et al. (2020a, 2020b, 2022a, 2025a); the full
@@ -317,20 +330,7 @@ by the data.*
 
 ## 5. The automated pipeline
 
-```mermaid
-flowchart TD
-    A["Waveforms downloaded from IRIS/EarthScope<br/>(teleseismic + regional)"] --> B["Step 1: instrument response removal,<br/>rotation, picks, 1 sample/s"]
-    B --> C["Step 2a: screening, stage 1<br/>(amplitudes, noise, dead channels, drift)"]
-    C --> D["Step 2b: Green's functions<br/>(mtel3 teleseismic, fk regional; CRUST1.0)"]
-    D --> E["Step 2c: priors and configuration<br/>(aftershock map, catalog moment tensor, bounds, windows)"]
-    E --> F["Step 3a: 1-subevent inversion"]
-    F --> G["calibrate from the 1-subevent model:<br/>time bounds, windows, wave-type weights,<br/>screening stage 2 (flipped / mis-scaled stations)"]
-    G --> G2["re-run N = 1 with the calibrated settings<br/>(so every N is scored on the same data)"]
-    G2 --> H["Step 3b: inversions for N = 2, 3, ...<br/>(32 MCMC chains each)"]
-    H --> I{"best N inside the<br/>5% band and below<br/>the largest N tried?"}
-    I -- no --> J["add one more subevent"] --> H
-    I -- yes --> K["Step 4: forward model, uncertainties,<br/>figures and RESULTS.md"]
-```
+![The automated SubMIT pipeline](docs/figures/pipeline.png)
 
 What each automatic decision does, and why it matters:
 
@@ -369,7 +369,10 @@ bash ../programs/step4_fwd_tempnsub.sh 4            # forward model + figures fo
 
 For each example, the main figure shows the subevents in map view (beachballs = moment tensors,
 error bars = 95% intervals from the MCMC ensemble, ★ = epicenter), the moment-rate functions, the
-total moment tensor and a depth section. Below it, a collapsible block holds the diagnostics:
+total moment tensor and a depth section. The station map shows the data used: teleseismic
+stations on a globe centered on the epicenter (rings every 30°), marked by whether they provide P,
+SH or both, and the regional stations around the epicenter. A collapsible block holds the
+diagnostics:
 
 * **Posterior histograms** — one row per subevent (E1, E2, …), one column per parameter (centroid
   time, duration, east and north location, depth). Narrow, single-peaked histograms mean a
@@ -389,6 +392,8 @@ depths step from 126 km to 170 km: the rupture grew mainly **downward** through 
 slab. This event (the "2024 Mw 7.4 Calama earthquake") was studied in detail with SubMIT by
 Jia et al. (2025a), who found five subevents over ~20 s at 125–174 km depth. Here the 5-subevent
 model fits only 1.4% worse than the 4-subevent one, and the 5% rule prefers the simpler model.
+
+![Chile: stations used](docs/figures/chile_stations.png)
 
 <details>
 <summary><b>Uncertainties and waveform fits (Chile)</b></summary>
@@ -419,6 +424,8 @@ Seven thrust subevents (Mw 8.1–8.5) over ~230 s. After a first subevent at the
 second ~80 km to the north, the rupture ran **~450 km to the south-southwest** along the
 trench. All seven mechanisms agree with the overall thrust mechanism (tensor similarity ≥ 0.94).
 
+![Kamchatka: stations used](docs/figures/kamchatka_stations.png)
+
 <details>
 <summary><b>Uncertainties and waveform fits (Kamchatka)</b></summary>
 
@@ -444,9 +451,16 @@ trench. All seven mechanisms agree with the overall thrust mechanism (tensor sim
 
 ![Venezuela](docs/figures/venezuela_subevents.png)
 
-Six subevents over ~110 s propagating **~170 km east-northeast** along the coast, combining
-short, strong bursts with a longer, smoother subevent. The total moment (Mw 7.58) exceeds the
-catalog Mw 7.2 — the one result in this set that we flag for further study.
+Six subevents over ~110 s propagating **~170 km east-northeast** along the coast. The subevents'
+moment-rate functions are **too spiky**: four of the six last only 3–5 s despite magnitudes of
+Mw 6.5–7.3, and the model fits the SH waves poorly (mean waveform correlation 0.26 for SH versus
+0.59 for P, whereas SH correlates at 0.62–0.91 in the other examples). This points to a rupture
+that was not only a cascade of short, high-frequency asperity failures but also had a **much
+smoother, longer-lasting rupture in the background**, which is expressed more strongly in the SH
+waves and which short point-source subevents cannot represent. The total moment (Mw 7.58) also
+exceeds the catalog Mw 7.2. We flag this event for further study.
+
+![Venezuela: stations used](docs/figures/venezuela_stations.png)
 
 <details>
 <summary><b>Uncertainties and waveform fits (Venezuela)</b></summary>
@@ -475,6 +489,8 @@ catalog Mw 7.2 — the one result in this set that we flag for further study.
 
 Three strike-slip subevents within ~21 s; the third, ~15 s after the origin, lies ~50 km to the
 east-southeast. This matches the number of subevents of an earlier hand-tuned inversion.
+
+![California: stations used](docs/figures/california_stations.png)
 
 <details>
 <summary><b>Uncertainties and waveform fits (California)</b></summary>
@@ -543,6 +559,7 @@ subevent count with `bash ../programs/step3_do_inversions_tempnsub.sh N` from `I
 |------|---------|
 | `RESULTS.md` | summary: selected N, misfits, subevent table with uncertainties, total moment |
 | `subevents.png/.pdf` | the figure shown in Section 6 |
+| `stations.png/.pdf` | stations used: teleseismic P and SH (global map) and regional (local map) |
 | `lcurve.pdf/.txt` | misfit against the number of subevents and the selection |
 | `fits_P.pdf`, `fits_SH.pdf`, `fits_Pvel.pdf`, `fits_rayl.pdf` | data (black) vs prediction (red) at every station, with correlation coefficients |
 | `histoplot_py.pdf` | posterior distributions of every subevent parameter |

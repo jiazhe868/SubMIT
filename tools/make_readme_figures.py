@@ -187,7 +187,7 @@ if __name__ == "__main__":
     results_overview()
     for name, _ in EVENTS:
         ref = os.path.join(EX, name, "reference")
-        for src, dst in (("subevents", "subevents"), ("histoplot_py", "hist"),
+        for src, dst in (("subevents", "subevents"), ("stations", "stations"), ("histoplot_py", "hist"),
                          ("fits_P", "fits_P"), ("fits_SH", "fits_SH"), ("fits_rayl", "fits_rayl")):
             shutil.copy(os.path.join(ref, f"{src}.png"), os.path.join(OUT, f"{name}_{dst}.png"))
     print("wrote", sorted(os.listdir(OUT)))
