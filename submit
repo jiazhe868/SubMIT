@@ -9,6 +9,8 @@
 #   ./submit compare NAME                  compare a finished run with the published result
 #   ./submit prepare DIR                   step 1 for your own earthquake (Wilber tar files
 #                                          in DIR/IRIS and DIR/IRISloc)
+#   ./submit fetch-csn DIR EVENT_ID        optional, Chile: add strong-motion records from
+#                                          the CSN database (run before prepare)
 #   ./submit run DIR [--quick] [--nmax N]  steps 2-4 for your own earthquake
 #
 # Example modes (--mode):
@@ -60,6 +62,9 @@ cmd_check() {
     say "command-line tools"
     for t in sac saclst gawk perl gcc gfortran java mpirun; do
         command -v $t > /dev/null && ok "$t ($(command -v $t))" || miss "$t"
+    done
+    for t in wget unzip; do      # only for ./submit fetch-csn
+        command -v $t > /dev/null && ok "$t ($(command -v $t))" || printf '  optional %s (only needed for ./submit fetch-csn)\n' "$t"
     done
     if command -v mpiicx > /dev/null || command -v mpiicc > /dev/null; then ok "Intel MPI compilers"
     elif command -v mpicc > /dev/null && { command -v mpif90 > /dev/null || command -v mpifort > /dev/null; }; then ok "GNU MPI compilers (mpicc/mpif90)"
@@ -191,8 +196,25 @@ cmd_prepare() {
     if [ -d "$D/IRISloc" ]; then
         say "step 1: regional records"
         (cd "$D/IRISloc" && sh ../programs/step1_2_process_loc.sh)
+        # CSN strong motion (./submit fetch-csn) is merged over the Wilber records
+        if ls -d "$D"/StrongMotionData*/[12]???-??-*_*/ > /dev/null 2>&1; then
+            say "step 1: merging CSN strong-motion records"
+            for l in "$D"/IRISloc/[12]???-??-??-*_loc; do
+                [ -d "$l/data" ] || continue
+                b=$(basename "$l")
+                (cd "$D/IRISloc" && bash ../programs/step1_4_merge_csn.sh "${b%_loc}")
+            done
+        fi
     fi
     echo "Next: ./submit run $1"
+}
+
+cmd_fetch_csn() {
+    local D; D=$(cd "${1:?usage: ./submit fetch-csn DIR EVENT_ID}" && pwd)
+    [ -n "$2" ] || die "usage: ./submit fetch-csn DIR EVENT_ID (the id in https://evtdb.csn.uchile.cl/event/<EVENT_ID>)"
+    setup_env
+    (cd "$D" && bash "$PROG/ChileArray/fetch_csn_event.sh" "$2") || die "CSN download failed"
+    echo "Next: ./submit prepare $1   (merges these records into the regional data)"
 }
 
 cmd_run() {
@@ -316,6 +338,7 @@ case ${1:-help} in
     status)  shift; cmd_status "$@" ;;
     compare) shift; cmd_compare "$@" ;;
     prepare) shift; cmd_prepare "$@" ;;
+    fetch-csn) shift; cmd_fetch_csn "$@" ;;
     run)     shift; cmd_run "$@" ;;
-    *)       sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *)       sed -n '2,/^set -e/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' ;;
 esac

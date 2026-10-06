@@ -14,7 +14,7 @@
 
 ### Instruction: sh MyExtractSeed.sh ***.seed ###
 ### Require SAC, TauP and rdseed being installed ###
-### Require addp.cmd, adds.cmd, pickp.cmd, picks.cmd in ~/bin/; or you can change the path ###
+### Arrival times: programs/select/add_arrival.sh (TauP iasp91, bundled) ###
 
 
 ###############    extract the seed, add info and change name     #####################
@@ -145,8 +145,8 @@ cd Vel/
 #}' | sh
 
 ##################   Add P or S arrival times   ###################
-sh ~/bin/addp.cmd *.BHZ
-sh ~/bin/adds.cmd *.BH[EN12]
+sh ../../../programs/select/add_arrival.sh P *.BHZ
+sh ../../../programs/select/add_arrival.sh S *.BH[EN12]
 
 ########   change those stations which CMPAZs have minor error   ##########
 ls -1 *BH1 | gawk 'BEGIN{FS="."} {print $1"."$2"."$3".BH"}' > BH1list
@@ -288,7 +288,34 @@ if(sqrt(($2-0.05)^2)<1e-4){
                 print "decimate 5";
                 print "w over";
         }
+if(sqrt(($2-0.02)^2)<1e-4){
+                print "r",$1;
+                print "decimate 5";
+                print "decimate 5";
+                print "decimate 2";
+                print "w over";
+        }
+if(sqrt(($2-0.0125)^2)<1e-5){
+                print "r",$1;
+                print "decimate 2";
+                print "decimate 2";
+                print "decimate 4";
+                print "decimate 5";
+                print "w over";
+        }
+if(sqrt(($2-0.04)^2)<1e-4){
+                print "r",$1;
+                print "decimate 5";
+                print "decimate 5";
+                print "w over";
+        }
 } END{print "quit"}' | sac
+# anything still not at 1 sample/s (an unlisted sampling rate) would be read
+# with the wrong time step by the inversion: set the whole station aside
+saclst delta f *.*.*.[rtz] | gawk '{if (($2-1)^2 > 1e-6) print $1}' | sed 's/\.[rtz]$//' | sort -u | while read base; do
+    echo "WARNING: $base is not at 1 sample/s after decimation - moved to others/"
+    mv "$base".[rtz] others/
+done
 
 ##############    Remove RESP files    #############################
 cp *.[rtz] ../../data

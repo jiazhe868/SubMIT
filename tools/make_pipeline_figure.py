@@ -75,7 +75,7 @@ def down(b_from, b_to, color=INK):
 
 TOP = 60
 # column 1 - data
-c1 = [box(0, TOP, "teleseismic (30°–90°) + regional", "Download waveforms"),
+c1 = [box(0, TOP, "teleseismic (40°–90°) + regional", "Download waveforms"),
       box(0, TOP - (H + GAP), "response removal, rotation,\narrival picks, 1 sample/s", "Step 1: processing")]
 # column 2 - preparation
 c2 = [box(1, TOP, "amplitude outliers, noise,\ndead channels, drift", "Screening, stage 1"),

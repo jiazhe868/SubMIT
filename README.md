@@ -25,7 +25,7 @@ subevents the data actually support**.
 Four validated example earthquakes are included, and each can be reproduced with one command.
 
 The method was introduced and applied in Jia et al. (2020a, 2020b, 2022a, 2025a); the full
-references are in [Section 12](#12-credits-citation-and-licenses).
+references are in [Section 13](#13-credits-citation-and-licenses).
 
 ![How SubMIT sees an earthquake](docs/figures/concept.png)
 
@@ -46,12 +46,13 @@ subevents in space and time.*
 4. [How the method works (with equations)](#4-how-the-method-works)
 5. [The automated pipeline](#5-the-automated-pipeline)
 6. [Results of the examples](#6-results-of-the-examples)
-7. [Running your own earthquake](#7-running-your-own-earthquake)
-8. [Reading the outputs](#8-reading-the-outputs)
-9. [Using an AI coding assistant](#9-using-an-ai-coding-assistant)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Repository layout](#11-repository-layout)
-12. [Credits, citation and licenses](#12-credits-citation-and-licenses)
+7. [Data: what to download and how](#7-data)
+8. [Running your own earthquake](#8-running-your-own-earthquake)
+9. [Reading the outputs](#9-reading-the-outputs)
+10. [Using an AI coding assistant](#10-using-an-ai-coding-assistant)
+11. [Troubleshooting](#11-troubleshooting)
+12. [Repository layout](#12-repository-layout)
+13. [Credits, citation and licenses](#13-credits-citation-and-licenses)
 
 ---
 
@@ -151,8 +152,10 @@ SubMIT runs on Linux (tested on Ubuntu 22.04). You need:
 | **MPI** + **C and Fortran compilers** | the inversion runs one Markov chain per MPI rank | Open MPI or MPICH with `gcc`/`gfortran` (`sudo apt install libopenmpi-dev gfortran`), or Intel oneAPI (`mpiicx`/`mpiifx`, faster) |
 | **Java** | TauP travel times (bundled) | `sudo apt install default-jre` |
 | **Perl, gawk** | Green's-function and data scripts | usually preinstalled |
+| **wget, unzip** | only for the optional Chilean strong-motion download (`./submit fetch-csn`) | usually preinstalled |
 | **Python 3 + packages** | preparation, screening, figures | `conda env create -f environment.yml` |
 | ~2–4 GB disk per example | Green's functions | |
+| internet access | step 2 queries the USGS catalog for a new earthquake; maps download coastlines once | not needed to reproduce the examples, apart from the coastlines |
 
 Then:
 
@@ -225,7 +228,7 @@ the station azimuth, $`c_j`$ the apparent horizontal velocity of the ray (from T
 the vertical slowness at the source (P or S velocity $`v`$). This is the term that produces the
 bunching/stretching in the figure at the top.
 
-For **regional three-component records** (up to ~950 km), Green's functions are computed with the
+For **regional three-component records** (stations up to ~750 km away), Green's functions are computed with the
 frequency–wavenumber code `fk` in a 1-D CRUST1.0 model on a distance–depth grid, and each subevent
 uses the Green's function for its *own* distance and azimuth to the station (bilinear
 interpolation), so the timing is exact rather than approximated.
@@ -515,19 +518,211 @@ east-southeast. This matches the number of subevents of an earlier hand-tuned in
 
 ---
 
-## 7. Running your own earthquake
+## 7. Data
 
-1. **Download waveforms** with [Wilber 3](https://ds.iris.edu/wilber3/) as SAC files with
-   response (SACPZ) files: teleseismic broadband stations at 30°–90° (`BH?` channels), and, in a
-   separate request, regional stations within ~10° if there are any. Keep Wilber's event-folder
-   name (`YYYY-MM-DD-mwXX-region`, e.g. `2024-07-19-mww74-chile-argentina-border-region`): the
-   magnitude is read from it.
-2. **Put the downloads in a new folder** (short path, see [Troubleshooting](#10-troubleshooting)):
+SubMIT fits two sets of seismograms of the same earthquake: **teleseismic** records from stations
+far away, and **regional** records from stations near the earthquake. Both are free. You download
+them with [Wilber 3](https://ds.iris.edu/wilber3/), the event-based download tool of the
+EarthScope (formerly IRIS) Data Management Center, which also collects data from other data
+centers (GEOFON, RESIF, NCEDC, …). All four examples use both sets, and the pipeline has only been
+tested with both.
+
+| | teleseismic | regional |
+|---|---|---|
+| what it constrains | P and SH waves seen from all directions: when, where and how each subevent slipped | three-component waveforms close to the rupture: sharpen locations and timing |
+| distance from the epicenter | **40°–90°** | **up to ~6.5° (~750 km)** |
+| channels | **`BH?`** (broadband seismometers) | **`HN?`** (strong-motion accelerometers) **or** **`BH?`**, see below |
+| time window | 5 min before the P arrival to 30 min after it | 5 min before the origin time to 20 min after it |
+| stations in the examples | 100–150 downloaded, 58–75 kept | from 2 (Kamchatka) to 96 (California) used |
+| what SubMIT fits | P on the vertical and SH on the transverse component | all three components |
+
+Why these distances: closer than ~40°, teleseismic P and S waves travel through the upper mantle,
+whose layering splits them into several arrivals that the simple teleseismic Green's functions do
+not model; beyond ~90° they are diffracted around the core. Regional stations farther than
+~750 km are ignored automatically: the regional Green's functions are computed in a single 1-D
+model of the source region and only out to 950 km, which includes a 200-km margin for subevents
+away from the epicenter.
+
+### 7.1 Strong-motion (`HN?`) or broadband (`BH?`) regional stations
+
+Channel codes have three letters: the first is the sampling band, the second the type of sensor,
+the third the component (`Z`, `N`, `E` or `1`, `2`).
+
+* **`HN?` = accelerometers ("strong-motion" sensors)**, usually 100–200 samples/s. They are built
+  to stay on scale during the strongest shaking, so they record large earthquakes cleanly even a
+  few tens of kilometers from the fault. **Use them wherever they exist** (dense strong-motion
+  networks cover Chile, California, Japan, Taiwan, …). The `chile`, `california` and `venezuela`
+  examples use them.
+* **`BH?` = broadband seismometers**, usually 20–50 samples/s. They are far more sensitive, which
+  is ideal for distant earthquakes, but near a large earthquake they often **clip** (the signal
+  exceeds the sensor's range) or are disturbed by tilt. Use them for the regional data only where
+  there are no strong-motion stations, as in the `kamchatka` example.
+* Step 1 removes the instrument response of both types to obtain ground velocity, and filters the
+  regional records above 0.02 Hz (periods shorter than 50 s), which removes the long-period drift
+  that accelerometer records often carry.
+* **Request one type per earthquake.** If the regional download contains *any* `HN?` channel,
+  step 1 uses only the `HN?` channels and ignores `BH?`; it switches to `BH?` only when there is no
+  `HN?` channel at all. Other channel types (`HH?`, `HL?`, `EN?`, `LH?`, …) are not read.
+
+Rule of thumb: request `HN?` if Wilber lists strong-motion stations within ~6.5° of the
+earthquake; otherwise request `BH?`.
+
+### 7.2 Downloading with Wilber 3, step by step
+
+1. **Find the earthquake.** Open <https://ds.iris.edu/wilber3/>, find the event on the map or in
+   the list below it (**Custom Query** finds older events), and click its region name. The station
+   page opens.
+2. **Teleseismic request.** On the station page, set
+   * **Networks**: keep the default `_GSN` (Global Seismographic Network) and add other permanent
+     broadband networks, for example `G` (GEOSCOPE), `GE` (GEOFON), `MN`, `IM`, `CN`, `AU`, `PS`.
+     Aim for stations evenly spread in azimuth around the earthquake. If one region has many
+     stations, the drop-down next to **All**/**None** keeps one station every X degrees.
+   * **Channels**: `BH?`
+   * **Distance Range**: 40 to 90 (degrees)
+
+   Click **Request Data** and fill in the dialog:
+   * **Time Range**: Starting `5` minutes before `P arrival`; Ending `30` minutes after `P arrival`
+   * **Output Format**: `SAC binary (little-endian)`; **Bundle As**: `tar archive`
+   * **Request Label**: keep the default, for example `2024-07-19 mww7.4 Chile-Argentina Border Region`
+   * your name and e-mail address, then **Submit**.
+3. **Regional request.** Go back to the station page of the same event and set
+   * **Networks**: delete `_GSN` so that every network is shown
+   * **Channels**: `HN?` (or `BH?`, see [7.1](#71-strong-motion-hn-or-broadband-bh-regional-stations))
+   * **Distance Range**: 0 to 6.5
+
+   **Request Data**: Starting `5` minutes before `event time`; Ending `20` minutes after
+   `event time`; the same output format and bundle; and as **Request Label** the teleseismic label
+   followed by `_loc`, for example `2024-07-19 mww7.4 Chile-Argentina Border Region_loc`.
+4. **Download.** Wilber e-mails you when each request is ready. Download the two `.tar` files from
+   the link (they are kept in a public folder named after your name and the label).
+
+The examples used similar settings: teleseismic windows starting 5 min (Kamchatka: 10 min) before
+P and ending 17–31 min after it, and regional windows starting 3–7 min before and ending
+11–25 min after the origin time. Step 1 needs at least 50 s of record before the first arrival (to
+measure the noise) and, for regional records, at least 10 min after the origin time.
+
+### 7.3 Where to put the downloads
+
+Put the two tar files, unopened, in a new folder with a short path:
+
+```text
+/data/myevent/
+├── IRIS/       2024-07-19-mww74-chile-argentina-border-region.tar       (teleseismic)
+└── IRISloc/    2024-07-19-mww74-chile-argentina-border-region_loc.tar   (regional)
+```
+
+Each tar file contains one folder named after the request label, for example
+`2024-07-19-mww74-chile-argentina-border-region/`. Inside it are one SAC file per channel
+(`NET.STA.LOC.CHA.Q.YYYY.DDD.HHMMSS.SAC`) and, in one sub-folder per data center, the
+instrument-response files (`IRISDMC/SACPZ.NET.STA.LOC.CHA`, …). The folder names matter:
+
+* they must start with Wilber's date and magnitude, `YYYY-MM-DD-mwwXY-`. The magnitude (`mww74`
+  = 7.4) sets the ranges that the inversion searches;
+* the regional folder must be the teleseismic folder name followed by `_loc`. The teleseismic
+  folder may also end in `_tel…` (for example `…-northern_tel-california`); step 1 removes that
+  suffix.
+
+The epicenter, depth and origin time are read from the SAC headers that Wilber writes (`evla`,
+`evlo`, `evdp` in km, origin time `o`), that is, from the catalog solution shown in Wilber.
+
+**Data from somewhere else** (FDSN web services, ObsPy, your own network) work if you arrange them
+in the same way: SAC files with these names at the top of the folder, with station coordinates,
+component orientations (`cmpaz`, `cmpinc`) and the event location, depth and origin time in
+their headers, plus SACPZ response files (counts per meter of displacement, as FDSN services
+provide them) one sub-folder down. Put the folder in a `.tar` file, or put the folder itself
+directly in `IRIS/` or `IRISloc/`.
+
+### 7.4 Optional: Chilean strong-motion records (CSN)
+
+For earthquakes in Chile, the database of the Centro Sismológico Nacional (CSN,
+<https://evtdb.csn.uchile.cl>) has accelerograms from many more stations than Wilber
+distributes. For the `chile` example it provided 53 stations; Wilber had 7 usable ones, 4 of
+which are also in the CSN set. To use it, find the earthquake on the CSN site and copy the
+32-character id at the end of its address (`https://evtdb.csn.uchile.cl/event/<EVENT_ID>`).
+Then run, **before** `prepare`:
+
+```bash
+./submit fetch-csn /data/myevent 030cd73d4cf743e322b7bc88f1166a4c   # the chile example event
+./submit prepare /data/myevent
+```
+
+`fetch-csn` needs `wget` and `unzip`. It downloads every station of the event, integrates
+acceleration to velocity, filters above 0.01 Hz, resamples to 1 sample/s and writes the records
+to `myevent/StrongMotionData/`. `prepare` then merges them into the regional data; where a station
+is in both, the CSN record replaces the Wilber one. The CSN database keeps growing: a download in
+October 2026 returned 57 stations instead of the 53 used in the `chile` example (all 53 were
+identical to the published records). The bundled `examples/chile/inputs.tar.gz` keeps the
+published set.
+
+### 7.5 What step 1 (`./submit prepare`) does
+
+`prepare` unpacks the tar files and turns every record into a file that the inversion can read:
+
+1. renames the files `NET.STA.LOC.CHA` and makes the origin time the time reference (`o = 0`);
+2. removes the instrument response with the SACPZ files, giving ground velocity in m/s (SAC
+   `transfer … to vel freq 0.001 0.005 10 20`), then removes the mean and trend and tapers the
+   ends; regional records are also high-pass filtered at 0.02 Hz;
+3. computes the first P arrival (vertical component) and S arrival (horizontal components) in the
+   iasp91 Earth model with TauP and stores them in header `t1`;
+4. corrects horizontal components that are not exactly 90° apart in the metadata;
+5. rotates the horizontals: teleseismic to radial and transverse (`.r`, `.t`, `.z`); regional
+   `1`/`2` components to east and north (`.e`, `.n`, `.z`);
+6. keeps a station only if its signal-to-noise ratio, 10·log₁₀ of the variance in the 50 s after
+   the arrival divided by that in the 50 s before, is at least 3 dB on the teleseismic vertical
+   and transverse components, or at least 2 dB on all three regional components;
+7. removes stations that miss a component; teleseismic only, also removes records with peak
+   velocities above 1 mm/s (usually a wrong response or a glitch) and duplicate sensors at the
+   same station (location code `00` is preferred over `10`, and so on);
+8. resamples to 1 sample/s from 500, 200, 100, 80, 50, 40, 25 or 20 samples/s with SAC's
+   anti-alias `decimate`; a record at any other sampling rate is set aside with a warning;
+9. regional only: cuts the records from 50 s before to 600 s after the origin time (padding with
+   zeros if a record is shorter), and renames network `C` to `C1`.
+
+The results are in `IRIS/<event>/data/` (`*.r`, `*.t`, `*.z`) and `IRISloc/<event>_loc/data/`
+(`*.e`, `*.n`, `*.z`). Rejected records are kept, so you can see what was removed: those with a
+low signal-to-noise ratio in `Vel/rtr/bad_data/` (teleseismic) or `Vel/enz/bad_data/`
+(regional) inside the event folder, and the others in `Vel/rtr/others/` or `Vel/enz/others/`.
+This is the form in which the examples are bundled (`examples/<name>/inputs.tar.gz`). Running
+`prepare` (plus `fetch-csn` for `chile`) on the original Wilber downloads of the four examples
+reproduces those files exactly. The only exceptions are a few 50-samples/s records that an earlier
+version left at their original sampling rate and that no published inversion uses. Step 2 then
+screens the records again, more strictly ([Section 5](#5-the-automated-pipeline)).
+
+### 7.6 Data that the pipeline downloads by itself
+
+| what | source | used for | offline? |
+|------|--------|----------|----------|
+| aftershocks (first 7 days) and the seismicity of the year before | [USGS ComCat](https://earthquake.usgs.gov/fdsnws/event/1/) | the aftershock-based location prior | the examples replay the copies archived in `examples/<name>/catalog/` |
+| catalog moment tensor | Global CMT catalog 1990–2023, bundled (`programs/mt_SubMIT/1990_2023_gcmt.dat`); for later events the USGS ComCat moment tensor | the total-moment-tensor constraint | bundled, or archived for the examples |
+| crustal structure | CRUST1.0, bundled | Green's functions | yes |
+| coastlines and borders | [Natural Earth](https://www.naturalearthdata.com/), downloaded once by cartopy | maps | without internet the maps are drawn without coastlines |
+
+### 7.7 The data of the four examples
+
+| example | teleseismic (`BH?`) | regional | regional networks |
+|---------|---------------------|----------|-------------------|
+| `chile` | 103 `BHZ` channels at 41°–88° → 59 stations kept | `HN?`, 8 stations at 0.4°–4.8° from Wilber + 53 from CSN → 56 kept | C1 |
+| `california` | 129 `BHZ` channels at 42°–90° → 75 stations kept | `HN?`, 98 stations at 0.5°–2° → 96 kept | BK, CE, NC, RE, UO, UW |
+| `venezuela` | 117 `BHZ` channels at 42°–90° → 67 stations kept | `HN?`, 26 stations at 2.5°–8° → 22 kept | CM, PR |
+| `kamchatka` | 152 `BHZ` channels at 40°–90° → 58 stations kept | `BH?` (no strong motion nearby), 54 stations at 1°–14.6° → 27 kept, of which only IU.PET (two sensors) is within 750 km | AV, IU |
+
+Teleseismic networks: AU, BK, CI, CN, CU, G, GE, GT, IC, II, IM, IU, MN, NL, PS. All networks
+are listed with their DOIs in [Section 13](#13-credits-citation-and-licenses). Please cite them when
+you publish results based on their data.
+
+---
+
+## 8. Running your own earthquake
+
+1. **Download the data** as described in [Section 7](#7-data): a teleseismic request (`BH?`,
+   40°–90°) and a regional request (`HN?`, or `BH?` where there is no strong motion, within
+   ~6.5°), both as SAC tar files.
+2. **Put the downloads in a new folder** (short path, see [Troubleshooting](#11-troubleshooting)):
 
    ```text
    /data/myevent/
-   ├── IRIS/       the teleseismic .tar file(s) from Wilber
-   └── IRISloc/    the regional .tar file(s) from Wilber (optional)
+   ├── IRIS/       the teleseismic .tar file
+   └── IRISloc/    the regional .tar file
    ```
 
 3. **Run it:**
@@ -537,8 +732,10 @@ east-southeast. This matches the number of subevents of an earlier hand-tuned in
    ./submit run /data/myevent         # steps 2-4: everything else, including choosing N
    ```
 
-   The aftershock catalog and the catalog moment tensor are downloaded from the USGS during
-   step 2, so the machine needs internet access. Results appear in
+   For Chilean earthquakes, run `./submit fetch-csn /data/myevent EVENT_ID` before `prepare` to add
+   the CSN strong-motion records ([Section 7.4](#74-optional-chilean-strong-motion-records-csn)).
+   Step 2 downloads the aftershock catalog (and, for events after 2023, the catalog moment tensor)
+   from the USGS, so the machine needs internet access. Results appear in
    `/data/myevent/IRIS/figs_and_results/`. Add `--quick` to `run` first if you want a 10-minute
    check that everything works.
 
@@ -551,7 +748,7 @@ subevent count with `bash ../programs/step3_do_inversions_tempnsub.sh N` from `I
 
 ---
 
-## 8. Reading the outputs
+## 9. Reading the outputs
 
 `IRIS/figs_and_results/` collects everything for the selected model:
 
@@ -571,7 +768,7 @@ with x north, y east, z down; `Input.model` = time, x east, y north, duration, v
 
 ---
 
-## 9. Using an AI coding assistant
+## 10. Using an AI coding assistant
 
 Everything above is driven by the `./submit` command, so an AI coding assistant that can run
 shell commands can install, run and check SubMIT for you by following this README. Open the
@@ -585,7 +782,7 @@ repository in the assistant and ask, for example:
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | symptom | fix |
 |---------|-----|
@@ -598,19 +795,23 @@ repository in the assistant and ask, for example:
 
 ---
 
-## 11. Repository layout
+## 12. Repository layout
 
 ```text
-submit                  command-line driver (check, build, example, status, compare)
+submit                  command-line driver (check, build, example, status, compare,
+                        prepare, fetch-csn, run)
 environment.yml         Python environment
 examples/<name>/        four validated earthquakes
-  inputs.tar.gz           processed waveforms (output of step 1)
+  inputs.tar.gz           processed waveforms (output of step 1, see Section 7)
   catalog/                archived aftershock catalog and moment tensor (exact reproduction)
   gf_inputs/              velocity models + grid of the published Green's functions
   frozen/<N>sub/          exact configuration + best model of every published inversion
   reference/              published figures, L-curve, moment tensors, best model
 programs/               the package (paths inside are relative: keep this layout)
   step1_* ... step4_*     pipeline steps
+  MyExtractSeed*.sh       step-1 processing of the Wilber downloads (teleseismic / regional)
+  select/                 step-1 helpers: arrival times (add_arrival.sh), signal-to-noise selection
+  ChileArray/             optional download and conversion of Chilean CSN strong-motion records
   code_SubMIT/            MCMC inversion (finv.f90 + C forward/linear solver)
   fwd_SubMIT/             forward modeling and figures
   prepare_SubMIT/         screening, priors, weights, bounds, selection
@@ -623,7 +824,7 @@ docs/figures/           figures used in this README
 
 ---
 
-## 12. Credits, citation and licenses
+## 13. Credits, citation and licenses
 
 SubMIT was developed by Zhe Jia. If you use it, please cite the method papers (Jia et al., 2020a,
 2020b, 2022a) and Jia et al. (2025a), which used this code for the 2024 Mw 7.4 Calama earthquake
@@ -670,6 +871,9 @@ SubMIT was developed by Zhe Jia. If you use it, please cite the method papers (J
 
 * Haario, H., Saksman, E., & Tamminen, J. (2001). An adaptive Metropolis algorithm. *Bernoulli*,
   7(2), 223–242. https://doi.org/10.2307/3318737
+* Kennett, B. L. N., & Engdahl, E. R. (1991). Traveltimes for global earthquake location and
+  phase identification. *Geophysical Journal International*, 105(2), 429–465.
+  https://doi.org/10.1111/j.1365-246X.1991.tb06724.x (the iasp91 model used for arrival times)
 * Wells, D. L., & Coppersmith, K. J. (1994). New empirical relationships among magnitude, rupture
   length, rupture width, rupture area, and surface displacement. *Bulletin of the Seismological
   Society of America*, 84(4), 974–1002.
@@ -690,5 +894,52 @@ SubMIT was developed by Zhe Jia. If you use it, please cite the method papers (J
 * **r8lib** — John Burkardt (LGPL), linear algebra.
 * SAC is required but **not** included; obtain it from IRIS/EarthScope.
 
-Earthquake data are from IRIS/EarthScope and the networks that operate the stations; the aftershock catalogs
-and catalog moment tensors are from the USGS ComCat and the Global CMT project.
+### Data
+
+The waveforms of the examples were downloaded with Wilber 3 from the EarthScope Consortium Data
+Management Center (formerly IRIS DMC), which retrieved them through FDSN web services from
+EarthScope, GEOFON, INGV, NCEDC, NRCAN, ORFEUS, RESIF and SCEDC. The Chilean strong-motion records
+are from the Centro Sismológico Nacional (CSN), Universidad de Chile. Please acknowledge the
+networks whose data you use:
+
+| code | network | DOI |
+|------|---------|-----|
+| AU | Australian National Seismograph Network | [10.26186/144675](https://doi.org/10.26186/144675) |
+| AV | Alaska Volcano Observatory | [10.7914/SN/AV](https://doi.org/10.7914/SN/AV) |
+| BK | Berkeley Digital Seismograph Network | [10.7932/BDSN](https://doi.org/10.7932/BDSN) |
+| C1 | Red Sismológica Nacional (Chile) | [10.7914/SN/C1](https://doi.org/10.7914/SN/C1) |
+| CE | California Strong Motion Instrumentation Program | [10.7914/b34q-bb70](https://doi.org/10.7914/b34q-bb70) |
+| CI | Southern California Seismic Network | [10.7914/SN/CI](https://doi.org/10.7914/SN/CI) |
+| CM | Red Sismológica Nacional de Colombia | [10.7914/SN/CM](https://doi.org/10.7914/SN/CM) |
+| CN | Canadian National Seismograph Network | [10.7914/SN/CN](https://doi.org/10.7914/SN/CN) |
+| CU | Caribbean Network | [10.7914/SN/CU](https://doi.org/10.7914/SN/CU) |
+| G | GEOSCOPE | [10.18715/GEOSCOPE.G](https://doi.org/10.18715/GEOSCOPE.G) |
+| GE | GEOFON | [10.14470/TR560404](https://doi.org/10.14470/TR560404) |
+| GT | Global Telemetered Seismograph Network (USAF/USGS) | [10.7914/SN/GT](https://doi.org/10.7914/SN/GT) |
+| IC | New China Digital Seismograph Network | [10.7914/SN/IC](https://doi.org/10.7914/SN/IC) |
+| II | Global Seismograph Network (IRIS/IDA) | [10.7914/SN/II](https://doi.org/10.7914/SN/II) |
+| IM | International Miscellaneous Stations | [10.7914/vefq-vh75](https://doi.org/10.7914/vefq-vh75) |
+| IU | Global Seismograph Network (IRIS/USGS) | [10.7914/SN/IU](https://doi.org/10.7914/SN/IU) |
+| MN | Mediterranean Very Broadband Seismographic Network | [10.13127/sd/fbbbtdtd6q](https://doi.org/10.13127/sd/fbbbtdtd6q) |
+| NC | USGS Northern California Seismic Network | [10.7914/SN/NC](https://doi.org/10.7914/SN/NC) |
+| NL | Netherlands Seismic and Acoustic Network | [10.21944/e970fd34-23b9-3411-b366-e4f72877d2c5](https://doi.org/10.21944/e970fd34-23b9-3411-b366-e4f72877d2c5) |
+| PR | Puerto Rico Seismic Network & Puerto Rico Strong Motion Program | [10.7914/SN/PR](https://doi.org/10.7914/SN/PR) |
+| PS | Pacific21 | none ([FDSN page](https://www.fdsn.org/networks/detail/PS/)) |
+| RE | US Bureau of Reclamation Seismic Networks | none ([FDSN page](https://www.fdsn.org/networks/detail/RE/)) |
+| UO | Pacific Northwest Seismic Network, University of Oregon | [10.7914/SN/UO](https://doi.org/10.7914/SN/UO) |
+| UW | Pacific Northwest Seismic Network, University of Washington | [10.7914/SN/UW](https://doi.org/10.7914/SN/UW) |
+
+Catalogs and data sources:
+
+* Barrientos, S., & National Seismological Center (CSN) Team (2018). The seismic network of Chile.
+  *Seismological Research Letters*, 89(2A), 467–474. https://doi.org/10.1785/0220160195
+* Dziewonski, A. M., Chou, T.-A., & Woodhouse, J. H. (1981). Determination of earthquake source
+  parameters from waveform data for studies of global and regional seismicity. *Journal of
+  Geophysical Research*, 86(B4), 2825–2852. https://doi.org/10.1029/JB086iB04p02825
+* Ekström, G., Nettles, M., & Dziewoński, A. M. (2012). The global CMT project 2004–2010:
+  Centroid-moment tensors for 13,017 earthquakes. *Physics of the Earth and Planetary Interiors*,
+  200–201, 1–9. https://doi.org/10.1016/j.pepi.2012.04.002
+* U.S. Geological Survey (2017). Advanced National Seismic System (ANSS) Comprehensive Catalog
+  (ComCat). https://doi.org/10.5066/F7MS3QZH
+* Maps use coastlines and borders from [Natural Earth](https://www.naturalearthdata.com/) (public
+  domain).
