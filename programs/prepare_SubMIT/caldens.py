@@ -1,4 +1,8 @@
 import numpy as np
+import matplotlib
+# no display needed: with DISPLAY set, a fresh conda env picked QtAgg and aborted after writing the
+# outputs ("Could not find the Qt platform plugin xcb")
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 import argparse
@@ -193,10 +197,18 @@ else:
                 ix = min(max(int((pts[k, 0] - minx) / delta), 0), n2.shape[1] - 1)
                 iy = min(max(int((pts[k, 1] - miny) / delta), 0), n2.shape[0] - 1)
                 plab[k] = comp[iy, ix]
-            T = minimum_spanning_tree(cdist(pts, pts)).tocoo()
+            # the tree spans ONLY aftershocks on a surviving component (label > 0). Spanning all of
+            # them re-attached every zeroed speckle with a corridor (label 0 passed the test below):
+            # 141 bridges on the Kamchatka catalogue, support 40% of the grid instead of 16%, and two
+            # subevents of the published 7-subevent model sit on such corridors (cohort report
+            # 2026-10-23, item 2). Skipping edges that touch label 0 instead would also cut the wanted
+            # bridge of a doublet whose tree path runs through sparse in-between aftershocks.
+            on_support = plab > 0
+            pts, plab = pts[on_support], plab[on_support]
+            tree_edges = minimum_spanning_tree(cdist(pts, pts)).tocoo() if len(pts) > 1 else None
             nbridge = 0
-            for i, j in zip(T.row, T.col):
-                if plab[i] == plab[j] and plab[i] != 0:
+            for i, j in (zip(tree_edges.row, tree_edges.col) if tree_edges is not None else []):
+                if plab[i] == plab[j]:
                     continue
                 pq = pts[j] - pts[i]
                 nseg = max(2, int(np.hypot(*pq) / (delta / 2.0)))
@@ -229,20 +241,26 @@ else:
     if args.floor > 0:
         n2 = np.maximum(n2, args.floor * np.max(n2))
 
-# Prepare grid for final output
-A, B = np.meshgrid(xedges[:-1], yedges[:-1])
+# guard first: an all-zero map (every component classed minor) would be divided by zero below and
+# written as NaN, and finv would stop on a grid without any positive cell
+if not np.any(n2 > 0):
+    print("caldens: WARNING - density all zero, using a uniform prior over the full grid")
+    n2[:] = 1
+
+# Each value is the density of one histogram bin [edge, edge + delta), so it is written at the bin
+# CENTRE: finv interpolates bilinearly between these points and draws its initial positions within
+# delta/2 of them. Until v3 the values were written at the lower-left corner of each bin, which
+# shifted the whole prior by delta/2 (2 km) to the south-west.
+A, B = np.meshgrid(xedges[:-1] + delta / 2, yedges[:-1] + delta / 2)
 final = np.vstack([A.ravel(), B.ravel(), n2.ravel() / np.max(n2)]).T
 np.savetxt('seisdens.dat', final, fmt='%.2f', delimiter=' ')  # Smoothed aftershock density
 np.savetxt('seisgrids.dat', [minx, maxx, miny, maxy, delta], fmt='%.2f', delimiter=' ')  # Grid parameters
 
-# Determine the min and max x, y where n2 > 0 (guard: never an empty region)
+# the region where n2 > 0, from the lower edge of its first bin to the upper edge of its last bin
+# (v2 stopped at the lower edge of the last bin, 4 km short of the prior's support)
 nonzero_indices = np.where(n2 > 0)
-if len(nonzero_indices[0]) == 0:
-    print("caldens: WARNING - density all zero, using full grid as edges")
-    n2[:] = 1
-    nonzero_indices = np.where(n2 > 0)
-minx, maxx = xedges[nonzero_indices[1]].min(), xedges[nonzero_indices[1]].max()
-miny, maxy = yedges[nonzero_indices[0]].min(), yedges[nonzero_indices[0]].max()
+minx, maxx = xedges[nonzero_indices[1]].min(), xedges[nonzero_indices[1] + 1].max()
+miny, maxy = yedges[nonzero_indices[0]].min(), yedges[nonzero_indices[0] + 1].max()
 
 # Save the min and max x, y values to 'edges.dat'
 with open('edges.dat', 'w') as f:

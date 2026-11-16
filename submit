@@ -25,7 +25,7 @@
 # Other options:
 #   --quick         very short Markov chains (smoke test of the machinery only;
 #                   the numbers are NOT meaningful)
-#   --nmax N        largest number of subevents to try in --mode frozen/full
+#   --nmax N        largest number of subevents to try (default and upper limit: 7)
 #   --workdir DIR   where to create the run (default: ./work; keep the path
 #                   short - SAC cannot read file names longer than ~120 characters)
 #   --live-catalog  (full mode) query USGS for the aftershock catalog and moment
@@ -38,6 +38,19 @@ EX="$REPO/examples"
 
 say()  { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 die()  { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
+
+# Upper limit on the number of subevents: the default of --nmax and its maximum (decided
+# 2026-11-16). Models with 8 or more subevents are no longer interpretable as distinct ruptures, and
+# in the v3 rerun of the Mw 8.8 Kamchatka example the two independent 8-subevent searches disagreed
+# (0.775 and 0.801) while the 7-subevent ones agreed (0.8197, 0.8198). A selection at the limit is
+# reported as a lower bound (plot_lcurve.py). finv.f90 and forward_model.c keep array room for 9.
+max_subevent_count=7
+check_subevent_limit() {
+    case $1 in ''|*[!0-9]*) die "--nmax needs a whole number (got '$1')" ;; esac
+    if [ "$1" -lt 1 ] || [ "$1" -gt "$max_subevent_count" ]; then
+        die "--nmax $1 is outside 1..$max_subevent_count (the subevent limit, max_subevent_count in ./submit)"
+    fi
+}
 
 # ---------------------------------------------------------------- environment
 setup_env() {
@@ -66,6 +79,13 @@ cmd_check() {
     for t in wget unzip; do      # only for ./submit fetch-csn
         command -v $t > /dev/null && ok "$t ($(command -v $t))" || printf '  optional %s (only needed for ./submit fetch-csn)\n' "$t"
     done
+    if command -v mpirun > /dev/null; then
+        # the MPI launcher that steps 3-4 use must start a process: an OpenMPI 4.1 mpirun on the
+        # 2026-11 test machine hung even for "hostname" (and ignored the TERM of a plain timeout,
+        # hence -k)
+        (timeout -k 5 20 mpirun -np 1 true < /dev/null > /dev/null 2>&1) 2> /dev/null && ok "mpirun starts a process" \
+            || miss "mpirun did not start 'true' within 20 s (broken MPI launcher? try the Intel oneAPI one)"
+    fi
     if command -v mpiicx > /dev/null || command -v mpiicc > /dev/null; then ok "Intel MPI compilers"
     elif command -v mpicc > /dev/null && { command -v mpif90 > /dev/null || command -v mpifort > /dev/null; }; then ok "GNU MPI compilers (mpicc/mpif90)"
     else miss "MPI compilers (mpicc + mpif90, or Intel mpiicx + mpiifx)"; fi
@@ -158,11 +178,11 @@ extend_grid() {
     local ev=$1 n=$2 p=$(( $2 - 1 ))
     local s="inv_${ev}_${p}sub" t="inv_${ev}_${n}sub"
     rm -rf "$t"; cp -r "$s" "$t"
-    (cd "$t" && rm -f ./*best.dat best_model_* ./*chain.dat mpi.out allsamples.dat pooled_ensemble.dat ./*.o finv \
+    # burn_in and nsample scale with the number of subevents (get_search_par.py); copying them
+    # unchanged from n-1 is what once "capped" the published chains at 6000
+    (cd "$t" && rm -f ./*best.dat best_model_* ./*chain.dat mpi.out island_best_misfits.txt allsamples.dat pooled_ensemble.dat ./*.o finv ffwd \
         && sed -i "s/^num_subevent= *[0-9]*/num_subevent= $n/" Par.file \
-        && sed -i "s/^neq_min .*/neq_min $n/; s/^neq_max .*/neq_max $n/" search_par.file \
-        && awk -v want=$n '{print; last=$0} END{for(i=NR+1;i<=want;i++) print last}' Input.model > Input.model.new \
-        && mv Input.model.new Input.model)
+        && sed -i "s/^neq_min .*/neq_min $n/; s/^neq_max .*/neq_max $n/; s/^burn_in .*/burn_in $((3000 * n))/; s/^nsample .*/nsample $((1000 * n))/" search_par.file)
 }
 
 # steps 2-3 + automatic grid extension, in the current IRIS/ directory
@@ -172,7 +192,7 @@ run_pipeline() {
     bash ../programs/step2_prepare_inversions.sh
     ev=$(awk '{print $1; exit}' event_list.dat)
     [ "$quick" -eq 1 ] && set_short_chains
-    say "step 3: Bayesian inversions for 1-5 subevents (1-subevent calibration hooks included)"
+    say "step 3: Bayesian inversions for 1-5 subevents (1-subevent calibration included)"
     bash ../programs/step3_do_inversions.sh
     [ "$quick" -eq 1 ] && set_short_chains
     lcurve
@@ -181,9 +201,12 @@ run_pipeline() {
         n=$(( n + 1 ))
         say "selection is at the edge of the grid - extending to $n subevents"
         extend_grid "$ev" $n
-        bash ../programs/step3_do_inversions_tempnsub.sh $n
+        bash ../programs/step3_do_inversions.sh $n
         lcurve
     done
+    if [ "$(elbow)" = "$n" ]; then
+        echo "NOTE: the selection is at the limit of $nmax subevents; more subevents might fit better, so read $n as a lower bound"
+    fi
 }
 
 cmd_prepare() {
@@ -219,7 +242,7 @@ cmd_fetch_csn() {
 
 cmd_run() {
     local D; D=$(cd "${1:?usage: ./submit run DIR [--quick] [--nmax N]}" && pwd); shift
-    local quick=0 nmax=8
+    local quick=0 nmax=$max_subevent_count
     while [ $# -gt 0 ]; do
         case $1 in
             --quick) quick=1 ;;
@@ -228,16 +251,16 @@ cmd_run() {
             *) die "unknown option $1" ;;
         esac; shift
     done
+    check_subevent_limit "$nmax"
     setup_env
     ln -sfn "$PROG" "$D/programs"
     cd "$D/IRIS"
     exec > >(tee -a "$D/submit.log") 2>&1
     echo "started $(date)  repo=$REPO"
-    export SUBMIT_RESEED=2
     run_pipeline "$quick" "$nmax"
     local nsel; nsel=$(elbow)
     say "step 4: forward model + figures for the selected $nsel-subevent model"
-    bash ../programs/step4_fwd_tempnsub.sh "$nsel"
+    bash ../programs/step4_figures.sh "$nsel"
     echo "Figures and a results summary are in: $D/IRIS/figs_and_results/"
 }
 
@@ -257,6 +280,8 @@ cmd_example() {
         esac; shift
     done
     case $mode in figures|frozen|full) ;; *) die "--mode must be figures, frozen or full" ;; esac
+    local subevent_limit=${nmax:-$max_subevent_count}
+    check_subevent_limit "$subevent_limit"
     setup_env
     local fz="$EX/$name/frozen" ev nsel W
     ev=$(awk '{print $1}' "$EX/$name/event_list.dat")
@@ -271,11 +296,10 @@ cmd_example() {
     cd "$W/IRIS"
     exec > >(tee -a "$W/submit.log") 2>&1
     echo "started $(date)  repo=$REPO  mode=$mode quick=$quick"
-    export SUBMIT_RESEED=2
 
     if [ "$mode" = full ]; then
         [ $live -eq 1 ] || export SUBMIT_CATALOG_CACHE="$EX/$name/catalog"
-        run_pipeline "$quick" "${nmax:-8}"
+        run_pipeline "$quick" "$subevent_limit"
         nsel=$(elbow)
     else
         cp "$EX/$name/event_list.dat" .
@@ -283,18 +307,17 @@ cmd_example() {
         mkdir -p _integrated && cp -r "$ev/data" _integrated/data
         sh ../programs/prepare_SubMIT/process_tel_comp.sh _integrated > /dev/null
         local ns; ns=$(ls "$fz" | sed 's/sub$//' | sort -n)
-        [ -n "$nmax" ] && ns=$(for n in $ns; do [ "$n" -le "$nmax" ] && echo $n; done)
+        # published grids above the limit (Kamchatka was run up to 8) are cut to it; "if", because a
+        # trailing "[ ] && echo" fails the substitution under set -e when the last N is above the limit
+        ns=$(for n in $ns; do if [ "$n" -le "$subevent_limit" ]; then echo "$n"; fi; done)
         for n in $ns; do make_frozen_inv "$ev" "$n" "$fz"; done
-        # the forward-model template is the 1-subevent directory without results
-        rm -rf "fwd_$ev"; cp -r "inv_${ev}_1sub" "fwd_$ev"
-        rm -f "fwd_$ev"/best_model_* "fwd_$ev"/misfit.dat
         build_gfs "$ev" "$EX/$name/gf_inputs"
         if [ "$mode" = frozen ]; then
             [ $quick -eq 1 ] && set_short_chains
             for n in $ns; do
                 say "inversion with $n subevent(s)"
                 rm -f "inv_${ev}_${n}sub/best_model_hybrid.dat" "inv_${ev}_${n}sub/misfit.dat"
-                bash ../programs/step3_do_inversions_tempnsub.sh $n
+                bash ../programs/step3_do_inversions.sh $n
             done
             lcurve
             nsel=$(elbow)
@@ -305,7 +328,7 @@ cmd_example() {
     fi
 
     say "step 4: forward model + figures for the selected $nsel-subevent model"
-    bash ../programs/step4_fwd_tempnsub.sh "$nsel"
+    bash ../programs/step4_figures.sh "$nsel"
     say "done"
     echo "Figures and a results summary are in: $W/IRIS/figs_and_results/"
     echo "Compare with the published result:    ./submit compare $name"

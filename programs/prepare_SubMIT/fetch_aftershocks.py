@@ -3,6 +3,10 @@ import sys
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+import matplotlib
+# no display needed: with DISPLAY set, a fresh conda env picked QtAgg and aborted after writing the
+# outputs ("Could not find the Qt platform plugin xcb")
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import cartopy.crs as ccrs

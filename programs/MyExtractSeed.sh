@@ -45,74 +45,27 @@ find . -name "SACPZ*" > 1PZs
 cat 1PZs | gawk '{split($1,mm,"[_/.]"); if (mm[7]=="--") mm[7]="";print "mv "$1" RESP/"mm[5]"."mm[6]"."mm[7]"."mm[8]}'  | sh
 sed -i '6,8s/Z//g' RESP/*
 ls -1 *.BH? > BH1
-saclst o b nzyear nzjday nzhour nzmin nzsec nzmsec b f *.BH? > headerlist.dat
-cat headerlist.dat | awk '
-function to_seconds(hour, min, sec, msec) {
-    return hour * 3600 + min * 60 + sec + msec / 1000;
-}
-
-function from_seconds(total_seconds) {
-    hour = int(total_seconds / 3600);
-    total_seconds -= hour * 3600;
-    min = int(total_seconds / 60);
-    sec = int(total_seconds % 60);
-    msec = int((total_seconds - int(total_seconds)) * 1000);
-    return sprintf("%02d %02d %02d %03d", hour, min, sec, msec);
-}
-
+saclst o b nzyear nzjday nzhour nzmin nzsec nzmsec gcarc f *.BH? > headerlist.dat
+gawk '
+function is_leap(year) { return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 }
 {
-    # Read current values
-    o_time = $2;
-    b_time = $3;
-    nzyear = $4;
-    nzjday = $5;
-    nzhour = $6;
-    nzmin = $7;
-    nzsec = $8;
-    nzmsec = $9;
-    file = $1;
-
-    # Set o to 0 and adjust b
-    new_b_time = b_time - o_time;
-
-    # Calculate new time based on o_time
-    time_in_seconds = to_seconds(nzhour, nzmin, nzsec, nzmsec) + o_time;
-
-    # Handle possible negative or overflow values
-    while (time_in_seconds < 0) {
-        time_in_seconds += 86400; # Add one day in seconds
-        nzjday -= 1;              # Subtract one day
-        if (nzjday < 1) {
-            nzjday = 365;         # Wrap around to last day of the previous year (ignoring leap years for simplicity)
-            nzyear -= 1;          # Subtract one year
-        }
-    }
-
-    while (time_in_seconds >= 86400) {
-        time_in_seconds -= 86400; # Subtract one day in seconds
-        nzjday += 1;              # Add one day
-        if (nzjday > 365) {
-            nzjday = 1;           # Wrap around to the first day of the next year (ignoring leap years for simplicity)
-            nzyear += 1;          # Add one year
-        }
-    }
-
-    # Convert back to hours, minutes, seconds, and milliseconds
-    new_time = from_seconds(time_in_seconds);
-    split(new_time, time_parts);
-
-    new_hour = time_parts[1];
-    new_min = time_parts[2];
-    new_sec = time_parts[3];
-    new_msec = time_parts[4];
-
-    # Print SAC commands
-    print "r " file;
-    print "ch o 0 b " new_b_time;
-    print "ch nzyear " nzyear " nzjday " nzjday " nzhour " new_hour " nzmin " new_min " nzsec " new_sec " nzmsec " new_msec;
-    print "wh";
+    file = $1; o_time = $2; b_time = $3; nzyear = $4; nzjday = $5
+    seconds = $6 * 3600 + $7 * 60 + $8 + $9 / 1000 + o_time
+    # crossing midnight moves the reference day, across New Year and leap years too (v2 assumed
+    # 365-day years)
+    while (seconds < 0) { seconds += 86400; nzjday -= 1; if (nzjday < 1) { nzyear -= 1; nzjday = is_leap(nzyear) ? 366 : 365 } }
+    while (seconds >= 86400) { seconds -= 86400; nzjday += 1; if (nzjday > (is_leap(nzyear) ? 366 : 365)) { nzjday = 1; nzyear += 1 } }
+    hour = int(seconds / 3600); seconds -= hour * 3600
+    minute = int(seconds / 60); seconds -= minute * 60
+    print "r " file
+    print "ch o 0 b " b_time - o_time
+    printf "ch nzyear %d nzjday %d nzhour %02d nzmin %02d nzsec %02d nzmsec %03d\n", nzyear, nzjday, hour, minute, int(seconds), int((seconds - int(seconds)) * 1000)
+    # records prepared outside Wilber may lack gcarc/dist/az (README 7.3 promises they work): let SAC
+    # compute them; Wilber records keep their own values, so the examples are reproduced exactly
+    if ($10 == -12345) print "ch lcalda true"
+    print "wh"
 }
-END { print "q" }' | sac
+END { print "q" }' headerlist.dat | sac
 cat BH1 |gawk '{
 	print "r",$1;
 	print "transfer from polezero subtype RESP/"$1,"to vel freq 0.001 0.005 10 20";
@@ -203,6 +156,18 @@ rm *az.dat
 #rm -rf good
 
 ##############    Rot to gcp and cut (For BH[EN] and BH[12], respectively)   ###############
+# SAC's rotate needs both horizontals with the same length: for a pair whose records differ in length
+# (a short gap in one component) it fails with ERROR 2010, and the next write stored the unrotated east
+# and north records as .r and .t (PITFALLS A1: 26 of the 56 SH records of the published Venezuela
+# model). Cut such pairs to their common window first; pairs of equal length are untouched.
+for pair in EN 12; do
+    first=$(echo $pair | cut -c1); second=$(echo $pair | cut -c2)
+    while read stem; do
+        # only a length mismatch: Wilber pairs differ in b by microseconds, which rotate tolerates
+        window=$(saclst b e npts f ${stem}${first} ${stem}${second} | gawk 'NR==1{b1=$2; e1=$3; n1=$4} NR==2{b2=$2; e2=$3; n2=$4} END{if (n1 != n2) print (b1 > b2 ? b1 : b2), (e1 < e2 ? e1 : e2)}')
+        [ -n "$window" ] && printf "cut %s\nr %s %s\nw over\ncut off\nq\n" "$window" ${stem}${first} ${stem}${second} | sac > /dev/null
+    done < BH${pair}list.dat
+done
 mkdir rtr/
 cat BHENlist.dat | gawk '{print "saclst t1 f "$1"Z"}' | sh | gawk '{a=$1;print "r "$1 ;print "rtr" ; gsub("BHZ","z",a);print "w rtr/"a ;a=$1; b=$1; gsub("BHZ", "BHE",a); gsub("BHZ","BHN", b);print "r",a,b; print "rtr" ; print "rot to gcp"; gsub("BHE","r",a); gsub("BHN","t",b); print "w rtr/"a, "rtr/"b;} END {print "quit";}' | tee | sac
 cat BH12list.dat | gawk '{print "saclst t1 f "$1"Z"}' | sh | gawk '{a=$1;print "r "$1 ;print "rtr" ; gsub("BHZ","z",a);print "w rtr/"a ;a=$1; b=$1; gsub("BHZ", "BH1",a); gsub("BHZ","BH2", b);print "r",a,b; print "rtr" ; print "rot to gcp"; gsub("BH1","r",a); gsub("BH2","t",b); print "w rtr/"a, "rtr/"b;} END {print "quit";}' | tee | sac
@@ -246,76 +211,7 @@ done
 ls -1 *.00.[rtz] | gawk ' BEGIN {FS="."} {print "mv "$1"."$2".[1-9]0."$4" others"}' | sh 2>/dev/null
 ls -1 *.10.[rtz] | gawk ' BEGIN {FS="."} {print "mv "$1"."$2".[2-9]0."$4" others"}' | sh 2>/dev/null
 
-saclst delta f *.*.*.[rtz] | gawk '{
-if(sqrt(($2-0.025)^2)<1e-4){
-                print "r",$1;
-                print "decimate 2";
-		print "decimate 2";
-                print "decimate 2";
-                print "decimate 5";
-                print "w over"
-        }
-if(sqrt(($2-0.01)^2)<1e-4){
-                print "r",$1;
-		print "decimate 2";
-                print "decimate 5";
-                print "decimate 2";
-                print "decimate 5";
-                print "w over";
-        }
-if(sqrt(($2-0.005)^2)<1e-4){
-                print "r",$1;
-                print"decimate 2";
-		print "decimate 2";
-                print "decimate 5";
-                print "decimate 2";
-                print "decimate 5";
-                print "w over";
-        }
-if(sqrt(($2-0.002)^2)<1e-4){
-                print "r",$1;
-		print "decimate 2";
-                print"decimate 5";
-                print "decimate 5";
-                print "decimate 2";
-                print "decimate 5";
-                print "w over";
-        }
-if(sqrt(($2-0.05)^2)<1e-4){
-                print "r",$1;
-		print "decimate 2";
-                print "decimate 2";
-                print "decimate 5";
-                print "w over";
-        }
-if(sqrt(($2-0.02)^2)<1e-4){
-                print "r",$1;
-                print "decimate 5";
-                print "decimate 5";
-                print "decimate 2";
-                print "w over";
-        }
-if(sqrt(($2-0.0125)^2)<1e-5){
-                print "r",$1;
-                print "decimate 2";
-                print "decimate 2";
-                print "decimate 4";
-                print "decimate 5";
-                print "w over";
-        }
-if(sqrt(($2-0.04)^2)<1e-4){
-                print "r",$1;
-                print "decimate 5";
-                print "decimate 5";
-                print "w over";
-        }
-} END{print "quit"}' | sac
-# anything still not at 1 sample/s (an unlisted sampling rate) would be read
-# with the wrong time step by the inversion: set the whole station aside
-saclst delta f *.*.*.[rtz] | gawk '{if (($2-1)^2 > 1e-6) print $1}' | sed 's/\.[rtz]$//' | sort -u | while read base; do
-    echo "WARNING: $base is not at 1 sample/s after decimation - moved to others/"
-    mv "$base".[rtz] others/
-done
+sh ../../../../programs/select/decimate_to_1sps.sh rtz
 
 ##############    Remove RESP files    #############################
 cp *.[rtz] ../../data

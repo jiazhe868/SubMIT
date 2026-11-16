@@ -1,80 +1,38 @@
-        program fmain
-        real rinitmodel(120), residual, wp, wsh, wrayl, &
-     &   ralpha, rcmt, rdc, rbdep, redep, rdepi, rbdist, redist, &
-     &   rdisti, elo, ela, evp, evs
-        integer nnstap, nnstash, insectp, insectsh, ndep, unknown, &
-     &   nnstarayl, nndist, insectrayl
-        parameter(nnsta=140, maxpts=500, maxnsub=6, maxdep=30, &
-     &   maxndist=100, maxn3d=1, maxnloc=40)
-        character stainfop_stname(64,nnsta),seisdatap_stname(64,nnsta),&
-     &   stainfosh_stname(64,nnsta),seisdatash_stname(64,nnsta), &
-     &   seisdatarayl_stname(64,maxnloc)
-        real stainfop_stdist(nnsta), stainfop_staz(nnsta),&
-     &   stainfop_stcp(nnsta),stainfop_stcs(nnsta),&
-     &   seisdatap_btime(nnsta),seisdatap_t1(nnsta),&
-     &   stainfosh_stdist(nnsta), stainfosh_staz(nnsta),&
-     &   stainfosh_stcp(nnsta),stainfosh_stcs(nnsta),&
-     &   seisdatash_btime(nnsta),seisdatash_t1(nnsta),&
-     &   fltsnp(30),fltsdp(30),fltsnsh(30),fltsdsh(30),&
-     &   stainforayl_stlo(maxnloc), stainforayl_stla(maxnloc),&
-     &   seisdatarayl_btime(maxnloc),seisdatarayl_t1(maxnloc),&
-     &   fltsnrayl(30),fltsdrayl(30),&
-     &   CMTsolution(5),strayl_wt(3,maxnloc)
-        integer nl,nlnz,ran,rand,j3
-        real gridxbg,gridxnd,gridybg,gridynd,griddx,randx,randy
-        real, dimension(:), allocatable :: gridx, gridy, gridz, &
-     &   gridxnz, gridynz, gridznz
-        real, allocatable :: seisdp_xdata(:,:), gfdp(:,:), &
-     &   seisdsh_xdata(:,:), gfdsh(:,:), seisdrayl_xdata(:,:),&
-     &   gfdrayl(:,:)
-        allocate(seisdp_xdata(maxpts,nnsta),&
-     &   gfdp(maxpts,6*maxdep*nnsta),seisdsh_xdata(maxpts,nnsta),&
-     &   gfdsh(maxpts,2*maxdep*nnsta), &
-     &   seisdrayl_xdata(maxpts,maxnloc*3),&
-     &   gfdrayl(maxpts,14*maxdep*maxndist))
+! ffwd.f90 - forward model of one subevent model: waveforms, moment tensors and per-station residuals.
+!
+! Reads Input.model (one line per subevent: centroid time, x east, y north, duration, rupture
+! velocity, rupture direction, depth), evaluates it with the same forward code that finv samples
+! (forward_model.c) and lets that code write fm.dat, sta_residual.dat, stf/*.sac and waveforms/*.sac
+! for the figures (step 4), the model-based station screen and the weight balancing (step 3 hooks).
+!
+! Until v2 this program kept its own copy of the forward code and of every data array; the copies
+! drifted apart (array sizes that differed between them once overwrote the SH filter
+! coefficients). It now holds nothing but the model.
+!
+! Run in an inversion or forward directory after "make ffwd":   ./ffwd
+! FFWD_COMPACT=1 ./ffwd prints the misfit lines only (used by the weight balancing).
+program ffwd
+    implicit none
+    integer, parameter :: max_subevents = 9
+    real :: model(7, max_subevents), penalized_misfit, source_s_velocity
+    integer :: subevent_count, read_status
+    character(len=512) :: line
 
-        open (14, FILE='totalmt.dat')
-        do ii=1,5
-                read(14,*) CMTsolution(ii)
-        end do
-        close(14)
+    ! one line per subevent; blank lines end the list
+    subevent_count = 0
+    open(10, file='Input.model', status='old')
+    do
+        read(10, '(A)', iostat=read_status) line
+        if (read_status /= 0 .or. len_trim(line) == 0) exit
+        if (subevent_count == max_subevents) stop 'ffwd: Input.model has more than 9 subevents'
+        subevent_count = subevent_count + 1
+        read(line, *) model(:, subevent_count)
+    end do
+    close(10)
+    if (subevent_count == 0) stop 'ffwd: Input.model is empty'
 
-        call sub_init(rbtimep, retimep, rbtimesh, retimesh, &
-     &   rbtimerayl, retimerayl, sbtime,&
-     &   setime, nptsp, nptssh, nptsrayl, rdelta, instap,&
-     &   instash, instarayl, insubev, &
-     &   rinitmodel, stainfop_stname, stainfop_stdist, stainfop_staz,&
-     &   stainfop_stcp, stainfop_stcs, stainfosh_stname, &
-     &   stainfosh_stdist, stainfosh_staz, stainfosh_stcp, & 
-     &   stainfosh_stcs, stainforayl_stlo, &
-     &   stainforayl_stla, strayl_wt, seisdatap_stname, &
-     &   seisdatap_btime, seisdatap_t1, seisdp_xdata,seisdatash_stname,&
-     &   seisdatash_btime, seisdatash_t1, seisdsh_xdata,&
-     &   seisdatarayl_stname, seisdatarayl_btime, seisdatarayl_t1, &
-     &   seisdrayl_xdata, gfdp, gfdsh, gfdrayl, &
-     &   fltsnp, fltsdp, fltsnsh, fltsdsh, fltsnrayl, &
-     &   fltsdrayl, insectp, insectsh, &
-     &   insectrayl, wp, wsh, wrayl, ralpha, rcmt, &
-     &   rdc, elo, ela, evp, evs, rbdist, redist, rdisti, nndist, &
-     &   rbdep, redep, rdepi, ndep, unknown)
-        call sub_forward(rbtimep, retimep, rbtimesh, retimesh, &
-     &   rbtimerayl, retimerayl, sbtime,&
-     &   setime, nptsp, nptssh, nptsrayl, rdelta, instap,&
-     &   instash, instarayl, insubev, &
-     &   rinitmodel, stainfop_stname, stainfop_stdist, stainfop_staz,&
-     &   stainfop_stcp, stainfop_stcs, stainfosh_stname, &
-     &   stainfosh_stdist, stainfosh_staz, stainfosh_stcp, &
-     &   stainfosh_stcs, stainforayl_stlo, &
-     &   stainforayl_stla, strayl_wt, seisdatap_stname, &
-     &   seisdatap_btime, seisdatap_t1, seisdp_xdata,seisdatash_stname,&
-     &   seisdatash_btime, seisdatash_t1, seisdsh_xdata,&
-     &   seisdatarayl_stname, seisdatarayl_btime, seisdatarayl_t1, &
-     &   seisdrayl_xdata, gfdp, gfdsh, gfdrayl, &
-     &   residual, fltsnp, fltsdp, fltsnsh,fltsdsh,fltsnrayl,&
-     &   fltsdrayl, insectp, insectsh, &
-     &   insectrayl, wp, wsh, wrayl, CMTsolution, &
-     &   ralpha, rcmt, rdc, elo, ela, evp, evs, rbdist, redist, &
-     &   rdisti, nndist, rbdep, redep, rdepi, ndep)
-        deallocate(seisdp_xdata, gfdp, seisdsh_xdata, gfdsh,&
-     &   seisdrayl_xdata, gfdrayl)
-        end program fmain
+    call sub_init(source_s_velocity)
+    call enable_forward_outputs()
+    call sub_forward(subevent_count, model, penalized_misfit)
+    write(*, '(A, F12.6)') 'penalized misfit', penalized_misfit
+end program ffwd

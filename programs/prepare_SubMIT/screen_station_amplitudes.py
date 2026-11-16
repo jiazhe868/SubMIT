@@ -1,5 +1,5 @@
 """Per-station amplitude screening for SubMIT (run inside an inv_* folder, after
-process_tel_comp.sh and BEFORE prepare_stationinfo.sh / gen_weight.py).
+process_tel_comp.sh and BEFORE prepare_stationinfo.py / gen_weight.py).
 
 SNR-based selection upstream cannot catch stations whose waveforms are clean but
 whose amplitude is wrong (bad instrument response, array elements) or near-nodal:
@@ -8,6 +8,18 @@ station, both dominating the L2 misfit. Here each wave-type group (P displacemen
 *.z, P velocity vel_*.z, SH *.t) is screened on log10 peak amplitude with a
 robust median/MAD rule; outliers move to data/excluded/ (never deleted) and are
 logged in excluded_stations.txt.
+
+First, records whose sampling interval is not the inversion's (DELTAT in programs/submit.conf) are set
+aside: forward_model.c stops on them, and v2 read them as if they were sampled every DELTAT seconds.
+The bundled California inputs hold G.DZM.00 at 0.02 s, left undecimated by v2's step 1, which stopped
+the first v3 run of ./submit example california --mode full.
+
+Last, dense networks are thinned to at most SUBMIT_MAX_TELESEISMIC_STATIONS stations (default 100):
+the inversion arrays were sized for 100 P stations (displacement + velocity = 200 traces) and the
+2025 Aomori (232 stations) and 2026 Tonga (108) clean-environment runs aborted in step 3 with
+"num_sta_P/SH exceeds maxstanum"; beyond ~100 well-spread stations a dense network mostly adds
+compute and over-weights its azimuth. The most redundant station (nearest neighbour in azimuth and
+distance) is removed first, keeping the one with the larger signal-to-noise ratio.
 """
 import glob
 import os
@@ -20,6 +32,28 @@ MIN_FACTOR = 8.0     # ... but never flag within a factor MIN_FACTOR of the medi
 MIN_GROUP = 8        # do not screen groups with fewer stations than this
 MIN_GROUP_LOC = 4    # regional sets are small; still screen (factor rule catches
                      # gross unit errors like raw counts, e.g. C1.TA01 ~1e5 too big)
+
+def read_sampling_interval():
+    """DELTAT from programs/submit.conf (the same file gen_par.py reads for Par.file deltat), default 1 s"""
+    for configuration in ("../../programs/submit.conf", "../programs/submit.conf"):
+        if os.path.exists(configuration):
+            for line in open(configuration):
+                if line.strip().startswith("DELTAT="):
+                    return float(line.split("=", 1)[1].split("#")[0])
+    return 1.0
+
+
+def sampling_interval_screen(files, report, expected_interval):
+    """records whose sampling interval differs from expected_interval (relative tolerance 1e-4, the
+    tolerance of forward_model.c, which stops on such a record)"""
+    flagged = []
+    for f in files:
+        interval = read(f, headonly=True)[0].stats.delta
+        if abs(interval - expected_interval) > 1e-4 * expected_interval:
+            report.append(f"delta   {f} sampling interval {interval:g} s, not {expected_interval:g} s")
+            flagged.append(f)
+    return flagged
+
 
 def peak_log_amp(f):
     tr = read(f)[0]
@@ -125,6 +159,54 @@ def snr_screen(files, label, report, snr_min, sig_end=90):
             continue
     return out
 
+
+def thin_dense_teleseismic_networks(report):
+    """Keep at most SUBMIT_MAX_TELESEISMIC_STATIONS stations, evenly spread over azimuth and distance.
+
+    Station separation is measured in degrees as sqrt(d_azimuth^2 + (2 d_distance)^2): the azimuth
+    gap is what resolves directivity, and at 40-90 deg a distance step of 1 deg changes the takeoff
+    angle about as much as 2 deg of azimuth. Of the closest pair, the station with the lower P
+    signal-to-noise ratio leaves (all its components, displacement and velocity).
+    """
+    max_stations = int(os.environ.get("SUBMIT_MAX_TELESEISMIC_STATIONS", "100"))
+    stations = {}
+    for f in glob.glob("data/*.z") + glob.glob("data/*.t"):
+        base = os.path.basename(f)
+        if base.startswith("vel_"):
+            continue
+        stations.setdefault(base[:-2], f)
+    if len(stations) <= max_stations:
+        return
+    names = sorted(stations)
+    azimuth, distance, quality = [], [], []
+    for name in names:
+        tr = read(stations[name], headonly=False)[0]
+        azimuth.append(float(tr.stats.sac.az))
+        distance.append(float(tr.stats.sac.gcarc))
+        t1 = tr.stats.sac.get("t1", None)
+        quality.append(0.0)
+        if t1 is not None:
+            i1 = int(round((t1 - tr.stats.sac.b) / tr.stats.delta))
+            noise = tr.data[max(0, i1 - 110):max(1, i1 - 10)]
+            signal = tr.data[max(0, i1 - 5):i1 + 90]
+            if len(noise) > 10 and len(signal) > 10 and np.std(noise) > 0:
+                quality[-1] = float(np.max(np.abs(signal)) / np.std(noise))
+    azimuth, distance, quality = np.array(azimuth), np.array(distance), np.array(quality)
+    kept = list(range(len(names)))
+    while len(kept) > max_stations:
+        a, d = azimuth[kept], distance[kept]
+        azimuth_gap = np.abs((a[:, None] - a[None, :] + 180) % 360 - 180)
+        separation = np.hypot(azimuth_gap, 2 * (d[:, None] - d[None, :]))
+        np.fill_diagonal(separation, np.inf)
+        first, second = np.unravel_index(np.argmin(separation), separation.shape)
+        drop = kept[first] if quality[kept[first]] < quality[kept[second]] else kept[second]
+        kept.remove(drop)
+        stem = names[drop]
+        for f in glob.glob(f"data/{stem}.[rtz]") + glob.glob(f"data/vel_{stem}.z"):
+            shutil.move(f, os.path.join("data/excluded", os.path.basename(f)))
+        report.append(f"thinned {stem} (dense network: >{max_stations} teleseismic stations)")
+    print(f"screen_station_amplitudes: thinned the teleseismic set from {len(names)} to {len(kept)} stations")
+
 def main():
     os.makedirs("data/excluded", exist_ok=True)
     report = []
@@ -132,8 +214,11 @@ def main():
              if not os.path.basename(f).startswith("vel_")]
     zvel = glob.glob("data/vel_*.z")
     tsh = glob.glob("data/*.t")
+    expected_interval = read_sampling_interval()
+    bad = set(sampling_interval_screen(zdisp + zvel + tsh, report, expected_interval))
+    zdisp, zvel, tsh = ([f for f in group if f not in bad] for group in (zdisp, zvel, tsh))
 
-    bad = set(screen(zdisp, "P-disp", report))
+    bad |= set(screen(zdisp, "P-disp", report))
     bad |= set(screen(zvel, "P-vel", report))
     bad |= set(screen(tsh, "SH", report))
     bad |= set(snr_screen(zdisp, "P-disp", report, SNR_MIN_TEL))
@@ -141,7 +226,9 @@ def main():
 
     # regional 3-component sets: screen all components together; exclude whole station
     loc = sorted(glob.glob("dataloc/*.e") + glob.glob("dataloc/*.n") + glob.glob("dataloc/*.z"))
-    badloc = set(screen(loc, "LOC", report, min_group=MIN_GROUP_LOC))
+    badloc = set(sampling_interval_screen(loc, report, expected_interval))
+    loc = [f for f in loc if f not in badloc]
+    badloc |= set(screen(loc, "LOC", report, min_group=MIN_GROUP_LOC))
     badloc |= set(snr_screen(loc, "LOC", report, SNR_MIN_LOC, sig_end=None))
     badloc |= set(drift_screen(loc, "LOC", report))
     for f in list(badloc):
@@ -212,6 +299,8 @@ def main():
                         report.append(f"clipped {stem + c} (plateau fraction {frac:.3f})")
         except Exception:
             pass
+
+    thin_dense_teleseismic_networks(report)
 
     with open("excluded_stations.txt", "w") as fp:
         fp.write("\n".join(report) + ("\n" if report else ""))

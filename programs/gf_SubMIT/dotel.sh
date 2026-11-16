@@ -1,4 +1,6 @@
 #!/bin/bash
+# both work folders are created here: git does not track empty folders (cohort report item 5)
+mkdir -p greenFuncDir greenFuncDir_disp
 vmodel_folders=$(find greenFuncDir/ greenFuncDir_disp/ -maxdepth 1 -type d -name "vmodel_*")
 if [ -n "$vmodel_folders" ]; then
     echo "Deleting vmodel_* folders..."
@@ -32,7 +34,7 @@ if [ -n "$SUBMIT_GF_INPUTS" ] && [ -f "$SUBMIT_GF_INPUTS/distdep.dat" ]; then
 fi
 # UNION of P (.z) and SH (.t) distances: an SH-only station (P screened out,
 # transverse kept) otherwise gets NO Green's functions and sub_init reads
-# silent garbage for it (2024 Chile AU.MAW, fix 31)
+# silent garbage for it (2024 Chile AU.MAW); forward_model.c now stops on a missing file
 gcdistlst=$(saclst dist f  ${invd}/data/vel_*.z ${invd}/data/vel_*.t 2>/dev/null | gawk '{printf("%d\n",$2)}' | sort -n | uniq | tr '\n' ' ')
 
 depi=2
@@ -56,7 +58,11 @@ BEGIN {
     }
 }' | xargs -d '\n' -P "$NCORE" -I{} sh -c '{}' 
 
-cp -r greenFuncDir/vmodel_* greenFuncDir_disp/
+# greenFuncDir_disp/ is empty in the repository, and git does not track empty folders: a fresh clone
+# has none, the copy below failed, and the clean-up further down then deleted every computed Green's
+# function (cohort report 2026-10-23, item 5). Create it, and stop instead of deleting on failure.
+mkdir -p greenFuncDir_disp
+cp -r greenFuncDir/vmodel_* greenFuncDir_disp/ || { echo "dotel: copying the teleseismic Green's functions failed"; exit 1; }
 
 ls -1 -d greenFuncDir_disp/vmodel_* | while read dir; do
     while [ "$(jobs -rp | wc -l)" -ge "$NCORE" ]; do sleep 1; done
@@ -72,7 +78,14 @@ cd greenFuncDir/
 ls -1 -d vmodel_*  | gawk '{print "cd "$1;print "ls -1 ????*.grn.???? | awk '\''{print \"cp \"$1\" ../../greenFuncDir_disp/"$1"/vel_\"$1}'\'' | sh"; print "cd ../"}' | sh
 
 cd ../loc
-ls -1 -d vmodel_* | gawk '{print "cp "$1"/*.grn.???? ../greenFuncDir_disp/"$1; print "rm "$1"/*.grn.*"}' | sh
+# regional Green's functions join the teleseismic ones of the same depth; delete the originals only
+# after every copy succeeded
+copy_failed=0
+for depth_folder in vmodel_*; do
+    cp "$depth_folder"/*.grn.???? "../greenFuncDir_disp/$depth_folder/" || copy_failed=1
+done
+[ "$copy_failed" -eq 0 ] || { echo "dotel: copying the regional Green's functions failed - originals kept in loc/"; exit 1; }
+rm -f vmodel_*/*.grn.*
 cd ..
 rm -rf greenFuncDir/vmodel_*
 echo "finished calculating green's functions..."

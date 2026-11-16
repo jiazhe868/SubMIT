@@ -4,8 +4,8 @@
 # relative to origin, o=0, t1=0). CSN wins on station-name collisions.
 #
 # usage (from IRISloc/):  sh ../programs/step1_4_merge_csn.sh <wilber_event_name>
-# CSN input: ../StrongMotionData*/<csn_event>/C1.*..[enz] produced by
-# step1_3_process_array.sh + convert_to_sac.py (delta 0.1 s, o=0, b rel. origin).
+# CSN input: ../StrongMotionData*/<csn_event>/C1.*..[enz] produced by ./submit fetch-csn
+# (ChileArray/fetch_csn_event.sh + convert_to_sac.py; delta 0.1 s, o=0, b rel. origin).
 # If no CSN data exist (e.g. 2026 Venezuela), this script is a clean no-op (exit 0).
 ev=$1
 dest="${ev}_loc/data"

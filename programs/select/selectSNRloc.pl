@@ -1,4 +1,6 @@
 #!/usr/bin/perl 
+# regional selection (step 1): every component needs >= 2 dB signal-to-noise in the 50 s after the P
+# pick (header t2, written by MyExtractSeed_loc.sh) against the 50 s before it
 $snr="../../../../programs/select/snr";
 $zr=2;
 $er=2;
@@ -12,9 +14,9 @@ foreach $HZ (@HZ_data){
 	 $HN="$tmp"."\."."$time"."\."."$khole"."\."."n";
 if (-e $HZ) {
 
-		($junk,$zsnr)=split('=',`$snr $HZ t1 0 50`);
-		($junk,$esnr)=split('=',`$snr $HE t1 0 50`);
-		($junk,$nsnr)=split('=',`$snr $HN t1 0 50`);
+		($junk,$zsnr)=split('=',`$snr $HZ t2 0 50`);
+		($junk,$esnr)=split('=',`$snr $HE t2 0 50`);
+		($junk,$nsnr)=split('=',`$snr $HN t2 0 50`);
 		if (($zsnr>= $zr) && ($esnr>=$er) && ($nsnr>=$nr)) {
 			print "good zen component: $HZ SNR= $zsnr,$esnr,$nsnr\n";
 			`cp $HZ $HE $HN good_data`;

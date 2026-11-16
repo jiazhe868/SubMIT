@@ -9,8 +9,12 @@ def generate_search_par_file(event_name, mw, nsubeve):
         print(f"get_search_par: length-based duration {dur_len} s (giant event)")
         duration = dur_len
 
-    # Set burn_in and nsample
-    burn_in = nsubeve * 1000
+    # chain length: the burn-in is where the population search happens (finv resamples the chains at
+    # 25/50/75% of it), so it gets 3x the sampling length. v2 used 1000 + 1000 per subevent; in a
+    # 16-chain California 3-subevent test 6000 iterations left the median chain 7-34% above the best,
+    # while 9000 + 3000 brought 12 of 16 chains within 2% of it. The forward code is ~2x faster since
+    # v3, so 3000 + 1000 per subevent costs about the wall time of the old 1000 + 1000.
+    burn_in = nsubeve * 3000
     nsample = nsubeve * 1000
 
     # Set neq_min and neq_max

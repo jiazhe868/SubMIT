@@ -83,7 +83,7 @@ def generate_par_file(event_name, mw, evlo, evla, evdp):
     except Exception:
         pass
     extended = r_corner > max(1.5 * L_rup, L_rup + 40.0)
-    # persist the decision: step3's tighten_bounds_from_1sub.sh must NOT
+    # persist the decision: step 3's calibrate_from_1sub.sh must NOT
     # shrink cen_max for extended/doublet sources (the 1-sub scan only
     # captures the first event of a doublet)
     with open('extended.flag', 'w') as ef:
@@ -176,13 +176,15 @@ def generate_par_file(event_name, mw, evlo, evla, evdp):
 
     # Rayleigh window scales with the true aperture (a fixed 210 s cut off
     # surface waves beyond ~550 km); 3.0 km/s group speed + 30 s margin keeps
-    # the validated 210 s for <=450 km networks; clamped to maxnpts=500
+    # the validated 210 s for <=450 km networks; capped at 500 samples
     nd_timeRayl = max(210, round(max_sta / 3.0 + duration + 30)) + t_extra
-    # maxnpts=500 in sub_header.h; npts spans both endpoints, hence the -1
+    # The 500-sample cap was the array size of v2 (maxnpts in sub_header.h). v3 sizes its arrays from
+    # the data (forward_model.c), so the cap now only keeps the configurations of v2 and the
+    # published examples; the records themselves end 600 s after the origin (step 1).
+    # npts spans both endpoints, hence the -1.
     nd_max = bg_timeRayl + int((500 - 1) * deltat)
     if nd_timeRayl > nd_max:
-        print(f"gen_par: nd_timeRayl {nd_timeRayl} clamped to {nd_max} "
-              f"(maxnpts=500; enlarge sub_header.h to extend)")
+        print(f"gen_par: nd_timeRayl {nd_timeRayl} capped at {nd_max} (500 samples)")
         nd_timeRayl = nd_max
 
     # Local max time shift scales with the event's true aperture: ~10%

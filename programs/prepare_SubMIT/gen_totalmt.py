@@ -3,7 +3,7 @@ for the total-moment-tensor constraint, from GCMT when available.
 
 Search order: local catalog programs/mt_SubMIT/1990_2023_gcmt.dat (cols: lon lat
 dep mrr mtt mpp mrt mrp mtp exponent X Y ID[MMDDYY?]), else USGS online
-moment-tensor product. RTP -> XYZ per mrtp2xyz.sh (x north, y east, z down):
+moment-tensor product. RTP -> XYZ (x north, y east, z down):
 Mxx=Mtt, Myy=Mpp, Mxy=-Mtp, Mxz=Mrt, Myz=-Mrp.
 On any failure the existing totalmt.dat template is kept (harmless while
 CMTscaling ~ 0 in Par.file) and a loud warning is printed.
@@ -21,21 +21,25 @@ def mark(source):
     # band-limited misfit does not anchor the absolute moment, and without
     # the constraint the total magnitude drifts (Kamchatka M8.8 -> 8.34,
     # Calama M6.9 -> 7.12). The constraint rows are SCALE-INVARIANT in
-    # sub_forward.c (weighted by data-norm/target-moment), so one
+    # forward_model.c (weighted by data-norm/target-moment), so one
     # dimensionless strength works for every event. CMTscaling ~ 1/tolerance:
     # lam=3 tolerates ~33% moment deviation (dMw ~ 0.1) before the constraint
     # costs as much as the data misfit - a soft anchor that recovers the
     # target in SAMPLING (kinematics adapt; Calama sampled identically at 3
     # and 5) while still letting a genuinely different total be reported.
     # A template tensor (wrong event) keeps the constraint OFF (1e-9).
-    import os
+    # SUBMIT_CMTSCALING overrides the strength (cohort report 2026-10-23, item 6): 3 is a strong anchor
+    # (the 1-subevent mechanism then stays close to the catalogue tensor), 0.3 a weak one that lets
+    # the data speak for complex multi-mechanism events, 1e-9 switches the constraint off.
     import re
+    strength = os.environ.get("SUBMIT_CMTSCALING", "3")
     if source in ("gcmt-local", "usgs", "usgs-sum") and os.path.exists("Par.file"):
         txt = open("Par.file").read()
-        txt2 = re.sub(r"CMTscaling= \S+", "CMTscaling= 3", txt)
+        txt2 = re.sub(r"CMTscaling= \S+", f"CMTscaling= {strength}", txt)
         if txt2 != txt:
             open("Par.file", "w").write(txt2)
-            print(f"gen_totalmt: trusted tensor ({source}) -> CMTscaling= 3 (scale-invariant)")
+            print(f"gen_totalmt: trusted tensor ({source}) -> total-moment-tensor constraint ON, "
+                  f"CMTscaling= {strength} (set SUBMIT_CMTSCALING to change: 3 strong, 0.3 weak, 1e-9 off)")
 
 def write_totalmt(mtt, mpp, mtp, mrt, mrp, scale):
     rows = [mtt * scale, mpp * scale, -mtp * scale, mrt * scale, -mrp * scale]

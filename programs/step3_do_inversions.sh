@@ -1,136 +1,102 @@
 #!/bin/bash
-# INTERRUPT WARNING: the per-nsub work below runs inside an awk process that
-# calls system() - killing this driver script (or its shell) ORPHANS the awk,
-# which keeps orchestrating mpirun jobs. To stop a run, target the awk (and
-# its mpirun/finv children), not the driver: use ../programs/stop_step3.sh
-# <IRIS-dir>, which matches processes by /proc/PID/cwd before killing.
+# step3_do_inversions.sh - run the MCMC inversions (finv) for every number of subevents.
+#
+# Without arguments: every inv_<event>_<N>sub folder, N = 1, 2, ... in order. After N = 1 the
+# 1-subevent calibration (prepare_SubMIT/calibrate_from_1sub.sh) tightens the bounds and windows of
+# the N >= 2 runs, balances the wave-type weights and screens stations against the 1-subevent
+# prediction; N = 1 is then run again under that same configuration, so every point of the L-curve
+# is scored on identical data (otherwise N = 1 is scored on longer windows and other weights and the
+# 5% rule compares incomparable misfits). The first N = 1 result is kept as calibration_pass_model.txt
+# (a name that the *best.dat globs below cannot match: as calibration_pass_best.dat it was deleted by
+# the rerun's clean-up).
+# With arguments: only those N, without calibration (grid extensions, reruns after editing).
+#
+# Warm start: before N >= 2 runs, the best model of N-1 is copied to warm_start.dat; half of the
+# chains start from it plus one subevent drawn from the prior (finv.f90).
+#
+# History: this replaces step3_do_inversions.sh + step3_do_inversions_tempnsub.sh, which ran each
+# folder through awk system() (killing the driver orphaned the awk, which kept starting mpirun jobs).
+#
+# usage (in IRIS/):  bash ../programs/step3_do_inversions.sh          all N, with calibration
+#                    bash ../programs/step3_do_inversions.sh 6 7      only N = 6 and 7
+# stop a run:        sh ../programs/stop_step3.sh "$PWD"
+# ranks: SUBMIT_NCORE (default physical cores, at most 32); GNU toolchain: SUBMIT_NO_INTEL=1
+if [ -z "$BASH_VERSION" ]; then exec bash "$0" "$@"; fi
+# The whole script is one { ...; exit; } block, so bash parses all of it before running any of it.
+# bash otherwise reads a script while it runs it, and an edit during a multi-hour step 3 (as the
+# README invites for Par.file and the scripts) made it resume at a stale byte offset in the edited
+# file: "syntax error: unexpected end of file" after N = 5 of a test run, before the L-curve.
+{
+set -u
+# capture the arguments first: sourcing Intel's setvars.sh rewrites the positional parameters
+requested_counts="$*"
+set --
+. ../programs/compiler_environment.sh
 
-original_dir=$(pwd)
-# cores: override with SUBMIT_NCORE; use half the cores on very large nodes
-# physical cores only (nproc/threads-per-core), capped at 32 by default:
-# 32 chains are statistically sufficient, and rank counts at/near the core
-# count let Intel MPI's busy-wait spinning starve straggler chains (observed
-# 5x wall-time blowup at 64/64 under load). Override with SUBMIT_NCORE.
-tpc=$(lscpu 2>/dev/null | awk -F: '/^Thread\(s\) per core/{gsub(/ /,"",$2); print $2}')
-[ -n "$tpc" ] && [ "$tpc" -ge 1 ] 2>/dev/null || tpc=1
-phys=$(( $(nproc) / tpc ))
-[ "$phys" -gt 32 ] && phys=32
-ncore=${SUBMIT_NCORE:-$phys}
-[ "$ncore" -ge 1 ] || ncore=1
-# finished ranks sleep instead of burning a core while waiting for stragglers
-export I_MPI_WAIT_MODE=1
-# node-shared Green's functions (POSIX shm): one physical copy + one disk
-# read per node instead of per rank (validated bit-identical vs per-rank,
-# 39% faster at 8 ranks on Calama; ~20 GB RAM saved at 32 ranks). Opt out
-# with SUBMIT_SHM_GF=0.
-export SUBMIT_SHM_GF=${SUBMIT_SHM_GF:-1}
-
-# Source the Intel environment
-# find an Intel setvars if one exists (env INTEL_SETVARS wins); otherwise rely
-# on generic MPI wrappers already in PATH (Makefile auto-detects the compiler)
-# try Intel env candidates until one provides a WORKING ifx (stale installs may
-# lack it); if none does, the Makefile falls back to generic MPI wrappers
-# remember the user's python BEFORE the Intel env can put intelpython first on
-# PATH; the 1-subevent hooks (model-based screening) inherit it
-export SUBMIT_PYTHON=${SUBMIT_PYTHON:-$(command -v python3 || command -v python)}
-# SUBMIT_NO_INTEL=1 skips this (e.g. when building with GNU mpicc/mpif90:
-# an Intel mpirun cannot launch an OpenMPI/MPICH-built binary)
-[ "${SUBMIT_NO_INTEL:-0}" = "1" ] && INTEL_CANDIDATES="" || \
-    INTEL_CANDIDATES="$INTEL_SETVARS /opt/intel/oneapi/setvars.sh $HOME/intel/oneapi/setvars.sh"
-for sv in $INTEL_CANDIDATES; do
-    [ -n "$sv" ] && [ -f "$sv" ] || continue
-    . "$sv" --force > /dev/null 2>&1
-    if ! command -v ifx > /dev/null 2>&1; then
-        # some installs do not export the compiler via setvars: source it directly
-        for cv in $(ls -1d "$(dirname "$sv")"/compiler/*/env/vars.sh 2>/dev/null | sort -rV); do
-            [ -f "$cv" ] && . "$cv" > /dev/null 2>&1 && command -v ifx > /dev/null 2>&1 && break
-        done
-    fi
-    if command -v ifx > /dev/null 2>&1; then
-        echo "Intel env OK: $sv (ifx: $(command -v ifx))"
-        break
-    fi
-    echo "Intel env $sv has no working ifx, trying next candidate"
-done
-command -v mpirun > /dev/null || { echo "ERROR: mpirun not in PATH"; exit 1; }
-
-# GF-coverage preflight: sub_init's brsac read of a MISSING Green's function
-# is silent (garbage kernel for that station biases every inversion - 2024
-# Chile AU.MAW, fix 31). Verify every station distance in the 1sub info
-# files has GF files before burning compute; fail loudly with the list.
-gfmiss=0
-while read -r event_id rest; do
-    i1="inv_${event_id}_1sub"
-    gdir=$(ls -d gf_*/greenFuncDir_disp 2>/dev/null | head -1)
-    [ -d "$i1" ] && [ -n "$gdir" ] || continue
-    vd=$(ls -d "$gdir"/vmodel_* 2>/dev/null | head -1)
-    [ -n "$vd" ] || continue
-    for f in stations.info stationsSH.info; do
-        [ -s "$i1/$f" ] || continue
-        for dist in $(gawk '{print $NF}' "$i1/$f" | sort -n | uniq); do
-            ls "$vd/$dist".grn.* > /dev/null 2>&1 || {
-                echo "ERROR: no Green's functions at distance $dist (listed in $i1/$f)"
-                echo "       regenerate GFs (gf_SubMIT/dotel.sh now unions .z+.t distances)"
-                echo "       or remove the station from the info files + Par num_sta counts"
-                gfmiss=1
-            }
+# Every station distance must have Green's functions: a missing file was once read as silent garbage
+# for one station (2024 Chile AU.MAW). Check before spending hours of compute.
+check_green_function_coverage() {
+    local event=$1 inversion_dir="inv_${1}_1sub" gf_folder first_depth_folder station_list distance missing=0
+    gf_folder="gf_${event}/greenFuncDir_disp"
+    [ -d "$inversion_dir" ] && [ -d "$gf_folder" ] || return 0
+    first_depth_folder=$(ls -d "$gf_folder"/vmodel_* 2>/dev/null | head -1)
+    [ -n "$first_depth_folder" ] || return 0
+    for station_list in stations.info stationsSH.info; do
+        [ -s "$inversion_dir/$station_list" ] || continue
+        for distance in $(gawk '{print $NF}' "$inversion_dir/$station_list" | sort -u); do
+            if ! ls "$first_depth_folder/$distance".grn.* > /dev/null 2>&1; then
+                echo "ERROR: no Green's functions at distance $distance (listed in $inversion_dir/$station_list)"
+                missing=1
+            fi
         done
     done
+    return $missing
+}
+
+# build and run one inversion folder; best_model_hybrid.dat = best sample over all chains.
+# mpirun reads /dev/null: it forwards its stdin to rank 0, and the stdin of this loop is
+# event_list.dat, whose remaining events it would otherwise consume.
+run_inversion() {
+    local inversion_dir=$1
+    ( cd "$inversion_dir" && make clean > /dev/null 2>&1 && make finv > make.log 2>&1 ) \
+        || { echo "COMPILE FAILED in $inversion_dir (see $inversion_dir/make.log)"; return 1; }
+    ( cd "$inversion_dir" && rm -f ./*best.dat best_model_*.dat ./*chain.dat mpi.out island_best_misfits.txt \
+        && mpirun -np "$submit_rank_count" ./finv > mpi.out 2>&1 < /dev/null ) \
+        || { echo "INVERSION FAILED in $inversion_dir (mpirun exit status; see $inversion_dir/mpi.out)"; return 1; }
+    if ! ls "$inversion_dir"/[0-9]*best.dat > /dev/null 2>&1; then
+        echo "INVERSION PRODUCED NO OUTPUT in $inversion_dir (see $inversion_dir/mpi.out)"
+        return 1
+    fi
+    sort -gk3 "$inversion_dir"/[0-9]*best.dat | head -1 > "$inversion_dir/best_model_hybrid.dat"
+    echo "inversion done: $inversion_dir best misfit $(gawk '{print $3}' "$inversion_dir/best_model_hybrid.dat")"
+}
+
+while read -r event_name rest; do
+    check_green_function_coverage "$event_name" || { echo "step3 ABORTED: Green's-function coverage incomplete"; exit 1; }
+    if [ -n "$requested_counts" ]; then
+        subevent_counts=$requested_counts
+    else
+        subevent_counts=$(ls -d inv_"${event_name}"_*sub 2>/dev/null | sed 's/.*_\([0-9]*\)sub$/\1/' | sort -n)
+    fi
+    for subevent_count in $subevent_counts; do
+        inversion_dir="inv_${event_name}_${subevent_count}sub"
+        [ -d "$inversion_dir" ] || { echo "skipping $inversion_dir (missing)"; continue; }
+        # warm start: half of the chains begin from the best N-1 model plus one subevent drawn from the
+        # prior (finv.f90); each N refines the previous one instead of searching from scratch
+        rm -f "$inversion_dir/warm_start.dat"
+        previous_best="inv_${event_name}_$((subevent_count - 1))sub/best_model_hybrid.dat"
+        [ "$subevent_count" -gt 1 ] && [ -s "$previous_best" ] && cp "$previous_best" "$inversion_dir/warm_start.dat"
+        # a failed N stops step 3: the L-curve would otherwise select among the N that happened to work
+        run_inversion "$inversion_dir" || { echo "step3 ABORTED at $inversion_dir"; exit 1; }
+        if [ -z "$requested_counts" ] && [ "$subevent_count" -eq 1 ] && [ -f "inv_${event_name}_2sub/Par.file" ]; then
+            bash ../programs/prepare_SubMIT/calibrate_from_1sub.sh "$inversion_dir" "$event_name" \
+                || { echo "step3 ABORTED: the 1-subevent calibration failed (messages above)"; exit 1; }
+            cp "$inversion_dir/best_model_hybrid.dat" "$inversion_dir/calibration_pass_model.txt"
+            cp "inv_${event_name}_2sub/Par.file" "$inversion_dir/Par.file"
+            echo "re-running $inversion_dir under the calibrated N>=2 configuration"
+            run_inversion "$inversion_dir" || { echo "step3 ABORTED at the rerun of $inversion_dir"; exit 1; }
+        fi
+    done
 done < event_list.dat
-[ "$gfmiss" -eq 0 ] || { echo "step3 ABORTED: GF coverage incomplete"; exit 1; }
-
-# Read and process the file using awk
-awk -v original_dir="$original_dir" -v ncore="$ncore" '
-{
-    event_name = $1
-    mw = $4
-    nsub = 1
-    while (nsub <= 9) {
-        target_dir = "inv_" event_name "_" nsub "sub"
-        if (system("[ -d " target_dir " ]") == 0) {
-            # Create the runmpi.sh script in the target directory
-            run_script = target_dir "/runmpi.sh"
-            print "#!/bin/bash" > run_script
-            print "make clean" >> run_script
-            print "make || { echo COMPILE FAILED in " target_dir "; exit 1; }" >> run_script
-            print "[ -x ./finv ] || { echo finv missing in " target_dir "; exit 1; }" >> run_script
-            print "rm -f *best.dat best_model_*.dat *chain.dat mpi.out" >> run_script
-            print "mpirun -np " ncore " ./finv > mpi.out 2>&1" >> run_script
-            print "ls *best.dat > /dev/null 2>&1 || { echo INVERSION PRODUCED NO OUTPUT in " target_dir "; exit 1; }" >> run_script
-            print "mode=exploration; [ \"$SUBMIT_RESEED\" = 1 ] && mode=ensemble; [ \"$SUBMIT_RESEED\" = 2 ] && mode=hybrid" >> run_script
-            print "sort -gk3 *best.dat | head -1 > best_model_${mode}.dat" >> run_script
-
-            # Make the runmpi.sh script executable
-            system("chmod +x " run_script)
-
-            # Run the runmpi.sh script
-            system("cd " target_dir " && bash runmpi.sh")
-
-            print "Executed runmpi.sh in", target_dir
-            # after the 1-sub scan, tighten the n>=2 search bounds to the
-            # empirically observed total source time (cen1+dura1): kills late
-            # noise-absorber subevents that a magnitude-scaled cen_max admits
-            # (2024 Chile M7.4 deep event: actual ~16 s vs Mw-scaled 31 s).
-            # No-op when the 1-sub duration railed its cap (giant events).
-            if (nsub == 1) {
-                system("sh ../programs/prepare_SubMIT/tighten_bounds_from_1sub.sh " target_dir " " event_name)
-                system("sh ../programs/prepare_SubMIT/balance_weights_from_1sub.sh " target_dir " " event_name)
-                system("sh ../programs/prepare_SubMIT/stage2_screen_from_1sub.sh " target_dir " " event_name)
-                # the hooks retune windows and weights for N>=2 only; re-run
-                # N=1 under that SAME configuration so every point of the
-                # L-curve is computed on identical data (otherwise N=1 is
-                # scored on longer windows / other weights and the 5% rule
-                # compares incomparable misfits). The first pass is kept.
-                n2 = "inv_" event_name "_2sub"
-                if (system("[ -f " n2 "/Par.file ]") == 0) {
-                    system("f=$(ls -t " target_dir "/best_model_*.dat 2>/dev/null | head -1); " \
-                           "[ -n \"$f\" ] && cp \"$f\" " target_dir "/calibration_pass_best.dat; " \
-                           "cp " n2 "/Par.file " target_dir "/Par.file && cd " target_dir " && bash runmpi.sh")
-                    print "Re-ran " target_dir " under the calibrated N>=2 configuration"
-                }
-            }
-        }
-        nsub++
-    }
-}' event_list.dat
-
+exit 0
+}
