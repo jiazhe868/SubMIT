@@ -1,13 +1,21 @@
-n  best_misfit  source
-1  3.0806  hybrid-snapshot
-2  2.3534  hybrid-snapshot
-3  1.9398  hybrid-snapshot
-4  1.5580  hybrid-snapshot
-5  1.5965  hybrid-snapshot
-6  1.2614  hybrid-snapshot
-7  1.1070  hybrid-snapshot
-8  1.1205  hybrid-snapshot
-NOTE: penalized misfit rises 4sub->5sub (1.5580->1.5965) - expected when the stress/CLVD penalties reject extra subevents; suspect non-convergence only if the DATA misfit also rises
-NOTE: penalized misfit rises 7sub->8sub (1.1070->1.1205) - expected when the stress/CLVD penalties reject extra subevents; suspect non-convergence only if the DATA misfit also rises
-grid minimum 1.1070; 5% band <= 1.1623
-SUGGESTED number of subevents (elbow): 7
+n  best_misfit  reduction_%  delta_aic  chains  chains_within_1%  island_bests
+1       2.9090            -      386.8      32                32  2.9085,3.0840,3.0861,3.0863
+2       2.2403         23.0      302.4      32                32  2.2404,2.2404,2.2420,2.2442
+3       1.7973         19.8      234.2      32                23  1.7991,1.8002,1.8022,1.8036
+4       1.4391         19.9      165.3      32                15  1.4408,1.4571,1.4575,1.4642
+5       1.1170         22.4       84.0      32                14  1.1202,1.2252,1.2298,1.2300
+6       0.9065         18.8       20.5      32                10  0.9066,0.9086,0.9199,0.9321
+7       0.8193          9.6        0.0      32                 6  0.8139,0.8216,0.8500,0.8707
+misfit components of each best model: penalized = data_misfit x clvd_factor x stress_factor (evaluate_misfit_components.sh)
+n    penalized  data_misfit  clvd_factor  stress_factor  worst_axis_deg  p_misfit  sh_misfit  regional_misfit
+N=1     2.9090       2.9082       1.0003         1.0000             0.0     2.872      2.948            5.786
+N=2     2.2403       2.0863       1.0738         1.0000            15.7     2.175      1.994           10.733
+N=3     1.7973       1.6440       1.0933         1.0000            10.4     1.699      1.585            9.832
+N=4     1.4391       1.3491       1.0667         1.0000            18.8     1.309      1.393           10.512
+N=5     1.1170       1.0449       1.0690         1.0000            16.5     1.034      1.057            9.430
+N=6     0.9065       0.8533       1.0623         1.0000            17.6     0.849      0.858            8.087
+N=7     0.8193       0.7771       1.0542         1.0000            22.9     0.777      0.775            8.199
+selection: AIC = ln(misfit) / sigma^2 + 2 k N, sigma = 0.05, k = 10 parameters per subevent, so a subevent costs 5% of misfit (ln(misfit) has to fall by 0.05, the misfit by 4.9%, to tie); delta_aic = AIC above the lowest; every N with delta_aic below 2 is tied, and the smallest of them is selected
+NOTE: the AIC is lowest at N=7, the largest number of subevents tried; more subevents might fit better, so read 7 as a lower bound
+lowest AIC: N=7
+SUGGESTED number of subevents (smallest N with delta_aic below 2): 7

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Write figs_and_results/RESULTS.md: the selected model, the L-curve with its selection stability,
-the subevent table and the convergence report of the chains.
+"""Write figs_and_results/RESULTS.md: the selected model, the L-curve table (plot_lcurve.py), the
+subevent table and the convergence report of the chains.
 
 usage (in IRIS/, called by step4_figures.sh): python make_results_doc.py <event> <N>"""
 import glob, os, sys
@@ -44,7 +44,10 @@ L += ["", "## Figures", "",
       "- `fits_P.pdf`, `fits_Pvel.pdf`, `fits_SH.pdf`, `fits_rayl.pdf` — waveform fits",
       "- `misfit_evolution.pdf` — misfit vs sample number, all chains",
       "- `histoplot_py.pdf` — posterior histograms (gated ensemble)",
-      "- `lcurve.pdf` — model selection", ""]
+      "- `lcurve.pdf` — model selection: best misfit per number of subevents (star: the selected number, the "
+      "smallest of those tied with the lowest AIC; dashed line: a misfit 5% lower per added subevent, the "
+      "cost of a subevent; hollow points: numbers that cannot be selected, their last subevent lies on the "
+      "bound of the centroid range; small open circles: island bests) and, to its right, the factors of the misfit", ""]
 if os.path.exists(f"{inv}/convergence.txt"):
     L += ["## Convergence of the chains", "```", open(f"{inv}/convergence.txt").read().rstrip(), "```", ""]
 os.makedirs("figs_and_results", exist_ok=True)

@@ -57,7 +57,10 @@ in ten it ran to the end and drew plausible figures. Each one is an entry of the
 | step 1, regional SNR | horizontals scored against the P coda | every component scored from the P arrival (Tonga: 1 → 5 of 5 stations) |
 | forward model | teleseismic timing referenced to the depth of subevent 1; sP shifted twice | referenced to the hypocenter, one shift (published Chile model: data misfit 0.854 → 0.824) |
 | prior | corridors drawn to aftershock clusters it had removed (Kamchatka: 40% of the grid) | corridors between surviving clusters only (16%) |
-| sampler | independent chains; the selected N could rest on one chain | warm start, relocation moves, population resampling, replicate bootstrap of the selection (Sections 4.5, 4.6) |
+| sampler | independent chains; the selected N could rest on one chain | warm start, relocation moves, population resampling (Section 4.5) |
+| number of subevents | the smallest N within 5% of the lowest misfit, which charges nothing per subevent (Venezuela: 6, 5 and 6 subevents in three runs) | the Akaike criterion: a subevent costs 5% of misfit, and of the numbers that tie the smallest is selected (Venezuela: 5 in every search; California: 4 in all three); ties are named (Section 4.6) |
+| centroid range | set by the magnitude alone; a rupture whose main energy comes later is cut off (Colombia: every chain on the bound at 31 s, the centroid being at 49.5 s) | doubled when the first 1-subevent run ends on its bound, and that run repeated (Section 5); a larger N whose best model ends on that bound is marked and not selected (Section 4.6) |
+| station screen against the 1-subevent model | skipped as a whole when that model is unrepresentative, which it is for six of nine events (Vanuatu: one drifting record kept, 68% of the P misfit) | a record more than 8 times above its group in the inversion band is always removed (Section 5) |
 | systems | no `greenFuncDir_disp` in a fresh clone, after which the clean-up deleted every Green's function; arrays fixed at 100 teleseismic stations; unchecked exit codes; NaN misfits under `-Ofast` | fixed |
 
 **Results on the three test events**, run from the raw downloads in a fresh installation with 16
@@ -66,16 +69,15 @@ because their data and timing differ):
 
 | event | v2 | v3 |
 |-------|----|----|
-| 2026 Panama Mw 7.7 | 4 regional stations; N = 2, resting on 1 of 16 chains (bootstrap 67%) | 17 regional stations; N = 4 with two seeds, L-curves within 0.4% of each other at every N, the same four subevents (the fourth 42 km west and 29–30 km north at 22–23 s) |
-| 2026 Tonga Mw 7.5, 234 km deep | 1 regional station; stopped in step 3 (array limit) | 5 regional stations; N = 1 (bootstrap 100%), all chains within 1%, split R-hat ≤ 1.12 |
-| 2025 Aomori Mw 7.6 | 232 teleseismic stations; stopped in step 3 (array limit) | thinned to 100; N = 3 (bootstrap 100%), all chains within 2%, split R-hat ≤ 1.14, Mw 7.59 |
+| 2026 Panama Mw 7.7 | 4 regional stations; N = 2, resting on 1 of 16 chains (the median chain's best 17% worse) | 17 regional stations; N = 4 with two seeds, L-curves within 0.4% of each other at every N, the same four subevents (the fourth 42 km west and 29–30 km north at 22–23 s) |
+| 2026 Tonga Mw 7.5, 234 km deep | 1 regional station; stopped in step 3 (array limit) | 5 regional stations; N = 1 (a second subevent raises the misfit by 1.3%), all chains within 1%, split R-hat ≤ 1.12 |
+| 2025 Aomori Mw 7.6 | 232 teleseismic stations; stopped in step 3 (array limit) | thinned to 100; N = 3 (a fourth subevent lowers the misfit by 3.2%), all chains within 2%, split R-hat ≤ 1.14, Mw 7.59 |
 
-The replicate check of Section 4.6 warned in both Panama runs (N = 4 won 16% and 20% of the
-bootstrap). In both, the best 4-subevent model was found only after the last resampling round, by
-1 and 3 of the 16 chains, and its posterior had not converged (split R-hat up to 5.5). The check is
-conservative at 16 ranks, because each island holds 8 chains and stops at 75% of the burn-in, and
-the two seeds did agree. What it flags is still real: for a rupture like this one, run N ≥ 4 with
-32 ranks or longer chains before interpreting the 4-subevent posterior. Each run took 67 (Aomori),
+The two Panama seeds agree on the model and on N: the fourth subevent lowers the misfit by 7.2% and
+7.1%, the fifth by 1.9% and 1.4% (Section 4.6). In both, the best 4-subevent model was found only
+after the last resampling round, by 1 and 3 of the 16 chains, and its posterior had not converged
+(split R-hat up to 5.5). For a rupture like this one, run N ≥ 4 with 32 ranks or longer chains
+before interpreting the 4-subevent posterior. Each run took 67 (Aomori),
 83–89 (Panama) and 143 minutes (Tonga, whose 234-km depth needs Green's functions at 64 depths) on
 a shared AMD EPYC 7532 machine. These runs used the code before the review fixes described next;
 each of those fixes was tested on its own.
@@ -86,22 +88,39 @@ confirmed and fixed
 published posterior: proposals that broke a hard rule were redrawn instead of rejected, and the
 prior was shifted by half a grid cell (2 km) to the south-west.
 
+**A second report** (2026-11-16) came with the folders of v2 reruns of four earthquakes: the
+bundled Chile example and three intermediate-depth events. In each of them the misfit rose
+somewhere along the number of subevents, and the selected number changed between runs. Run again
+with v3 (two chain seeds each), the four cases had three different causes:
+
+| event | v2 reruns of the report | v3 | cause |
+|-------|-------------------------|----|-------|
+| 2024 Chile Mw 7.4 (the bundled example) | N = 3 where the published run, on the same inputs, selected 4: the 4-subevent search ended above the 3-subevent one (0.948 against 0.897) | N = 4 in all three searches: 16 ranks, and 32 ranks with two seeds (4-subevent misfits 0.731, 0.732 and 0.734) | independent chains ([PITFALLS D1](PITFALLS.md#d1--one-lucky-chain-decides-the-number-of-subevents)) |
+| 2026 Colombia Mw 7.4, 116 km deep | N = 1, then N = 3; misfits of 3.3–4.0 | pipeline of 2026-11-16: N = 1 with both seeds, every chain on the upper bound of the centroid range (31 s). With the range doubled by the pipeline: N = 2 with both seeds, the two L-curves within 0.4% of each other at every N, and the same two subevents (a 24–27 s long one at the epicenter and a 5 s short one at 50 s, 41 km to the south-west) | the centroid range ended before the main energy of the rupture ([D4](PITFALLS.md#d4--the-centroid-range-cut-off-a-late-main-rupture)) |
+| 2026 Vanuatu Mw 7.3, 121 km deep | N = 1 twice, the misfit rising from one subevent to two | pipeline of 2026-11-16: N = 1 with both seeds, the misfit 10–15% higher with two subevents. With the record screen: N = 1 with both seeds; a second subevent lowers the misfit by 3.4% in one search and raises it by 2.3% in the other. Three subevents fit 11% better, with a third subevent in the corner of its search range (28.0 s of 28 s, 53 km east of 53 km) that fits the three regional stations; such models are marked and not selected. With the range widened by hand to 55 s, that subevent settles at 31.5 s on the top of the depth grid, and its P wave arrives between the pP phases of the first two subevents | one drifting record carried 68% of the P misfit ([A6](PITFALLS.md#a6--a-drifting-record-passed-both-station-screens)); a subevent on the bound of its range then won the selection ([D5](PITFALLS.md#d5--a-subevent-in-the-corner-of-its-search-range-won-the-selection)) |
+| 2026 Tonga Mw 7.5, 234 km deep | N = 1 twice, the misfit rising with every subevent | N = 1 (16 ranks, the data of the report): a second subevent raises the misfit by 3.6%, and no model with up to 5 subevents fits more than 1.2% better than one; all 16 chains within 1%, split R-hat ≤ 1.13 | none: one subevent is the answer |
+
+**Insight: "the selected number is unstable" was one symptom with three causes, and only measuring
+each of them told them apart: two seeds for the search, the position of the best model in its
+search range, and the share of the misfit that each record carries.**
+
 The forward model is now one file (`programs/code_SubMIT/forward_model.c`). With the two timing
 fixes patched into the v2 code as well, both give the same misfits (California 3-subevent model
 1.792850, Chile 4-subevent model 1.074403 against 1.074404), the same moment tensors and the same
 alignment shifts; the new code runs an iteration about twice as fast (6,000 iterations on 16 ranks:
 559 s against 1,156 s). The inversion core shrank from 10 files and 5,626 lines (two diverged copies
-of the forward code among them) to 3 files and 2,127 lines; the whole pipeline from 90 files and
+of the forward code among them) to 3 files and 2,169 lines; the whole pipeline from 90 files and
 13,800 lines, plus a 42,694-line numerical library of which v2 used a few functions, to 58 files
 and 8,971 lines. Steps 3 and 4 are one script each (`step3_do_inversions.sh`, `step4_figures.sh`)
 where v2 had four, and the three 1-subevent calibration hooks are one (`calibrate_from_1sub.sh`).
 `tests/test_regressions.py` guards the fixes that can be tested without SAC or MPI.
 
-**The bundled examples (Sections 2 and 6) still hold v2 results.** `--mode figures` redraws them
-with the v3 forward code, so its waveform fits and moment tensors differ slightly from the published
-ones, and `--mode frozen`/`full` give v3 results, still on the v2 step-1 inputs that are bundled
-with the examples (Section 1). The v3 reruns of the four examples from the raw downloads, which
-Section 4.6 cites, are not bundled yet.
+**The bundled examples (Sections 2 and 6) are v3 runs.** Each example was run again on 2026-11-17
+from its raw downloads with 32 MPI ranks, and `examples/<name>/` holds that run: its step-1 records,
+the configuration of every inversion, the best models and the figures
+(`tools/make_example_from_run.py`). Against the v2 results that they replace, California has four
+subevents where v2 had three and Venezuela five where v2 had six; Chile and Kamchatka keep four and
+seven. Section 6 says what changed in each model.
 
 **Insight: a pipeline that runs to the end is not a pipeline that worked. Most of these defects
 were found by checking the property a step was supposed to create (a rotated component, a timing
@@ -138,40 +157,42 @@ conda env create -f environment.yml && conda activate submit
 ./submit check                         # are all dependencies installed?
 ./submit build                         # compile the bundled Green's-function codes
 ./submit example california            # reproduce the 2024 California M7.0 result (~10 min)
-./submit compare california            # check it against the published numbers
+./submit compare california            # check it against the bundled numbers
 ```
 
 The figures and a summary (`RESULTS.md`) appear in `work/california/IRIS/figs_and_results/`.
-`./submit compare` prints a table like this one (from a test run of v3 on a fresh install):
+`./submit compare` prints a table like this one (from a run on a second machine, 6 minutes on 16
+cores):
 
 ```
 L-curve (best penalized misfit for each number of subevents)
   n  published  reproduced     diff
-  1     2.7122      2.7122    +0.0%
-  2     1.9677      1.9677    +0.0%
-  3     1.7905      1.7905    +0.0%
+  1     2.3857      2.3857    +0.0%
+  2     1.8898      1.8898    +0.0%
+  3     1.6189      1.6189    +0.0%
   ...
-selected number of subevents: published 3, reproduced 3
+selected number of subevents: published 4, reproduced 4
 
-selected 3-subevent model (published -> reproduced)
+selected 4-subevent model (published -> reproduced)
           time (s)               x,y (km)     depth (km)      dur (s)          Mw  MT sim
-E1     4.5->4.5        0,0   ->    0,0       3.1->3.1      3.3->3.3   6.55->6.54 +0.99
-E2     7.7->7.7        2,-0  ->    2,-0      3.0->3.0      8.7->8.7   6.91->6.91 +1.00
-E3    14.9->14.9      49,-18 ->   49,-18     3.7->3.7     11.7->11.7  6.62->6.62 +1.00
+E1     5.2->5.2        0,0   ->    0,0       3.0->3.0      3.7->3.7   6.58->6.58 +1.00
+E2     8.5->8.5        6,2   ->    6,2       3.0->3.0      8.1->8.1   6.87->6.87 +1.00
+E3    12.8->12.8      19,4   ->   19,4       3.1->3.1      3.5->3.5   6.50->6.50 +1.00
+E4    15.4->15.4      48,-13 ->   48,-13    16.0->16.0     5.5->5.5   6.73->6.73 +1.00
 total Mw: published 7.04, reproduced 7.04
 ```
 
-The L-curve comes from the published (v2) runs. The moment tensors are recomputed with the v3
-forward code, whose teleseismic timing changed ([What changed in v3](#what-changed-in-v3)), so E1
-differs slightly, and `RESULTS.md` notes that v3 scores the published model at 1.8850.
+"Published" stands for the numbers bundled with the example: those of its v3 run of 2026-11-17,
+made from the raw downloads with 32 MPI ranks. This default mode takes the L-curve and the best
+models from that run and recomputes the Green's functions, the forward model and the moment tensors.
 
 ### Three ways to reproduce an example
 
 | mode | what it does | time on 32 cores |
 |------|--------------|------------------|
-| `--mode figures` (default) | rebuilds the Green's functions and regenerates every figure from the published best models | 5–60 min |
-| `--mode frozen` | re-runs all the MCMC inversions with the exact published configuration files, then selects the number of subevents | 1–14 h |
-| `--mode full` | runs the whole automated pipeline from the processed waveforms: screening, weighting, priors, inversions, selection, figures | 1.5–16 h |
+| `--mode figures` (default) | rebuilds the Green's functions and regenerates every figure from the published best models | 6–13 min |
+| `--mode frozen` | re-runs all the MCMC inversions with the exact published configuration files, then selects the number of subevents | 1.5–4 h |
+| `--mode full` | runs the whole automated pipeline from the processed waveforms: screening, weighting, priors, inversions, selection, figures | 1.5–4 h |
 
 ```bash
 ./submit example chile --mode frozen      # re-run the inversions of the Chile example
@@ -184,20 +205,24 @@ differs slightly, and `RESULTS.md` notes that v3 scores the published model at 1
 Long runs keep going after you log out if you start them with
 `nohup ./submit example kamchatka --mode frozen > kam.log 2>&1 &`.
 
-Measured inversion times for the whole subevent grid with v2 (32 MPI ranks, AMD EPYC 7532):
-California ≈ 3 h, Chile ≈ 5 h, Venezuela ≈ 5 h, Kamchatka ≈ 14 h. v3 runs 4000·N iterations per
-subevent count instead of 2000·N, at about twice the speed per iteration; its three test events
-took 1–2.5 h from the raw downloads on 16 ranks ([What changed in v3](#what-changed-in-v3)).
-Green's functions add 5–60 min (more for deep events, which need a wide depth range).
+Measured times with 32 MPI ranks on shared servers (AMD EPYC 7543 and 7552). The bundled runs,
+from the raw downloads to the figures (`./submit prepare` and `./submit run`), took 1 h 34 min
+(Chile), 1 h 44 min (Venezuela), 1 h 49 min (California) and 3 h 43 min (Kamchatka, seven subevent
+counts). The `figures` mode took 6 min (California, on 16 cores), 13 min (Chile), 9 min (Venezuela)
+and 9 min (Kamchatka). The `frozen` mode took 1 h 27 min (Chile), 1 h 38 min (California) and
+1 h 42 min (Venezuela), and the `full` mode of California 1 h 47 min. With v2 the inversions alone
+took about 3 h (California) to 14 h (Kamchatka).
 
-`frozen` and `full` runs use the v3 code, so they do not reproduce the published v2 numbers: the
-timing of the synthetics and the sampler have changed ([What changed in v3](#what-changed-in-v3)).
-The bundled `inputs.tar.gz` are still the v2 step-1 outputs, so they also keep the unrotated SH
-records of v2 until they are rebuilt with `./submit prepare` from the original downloads. A v3 run
-repeats itself exactly on the same machine with the same number of MPI ranks. `full` mode also
-builds Green's functions with the current velocity-model rules (the published Chile run used an
-earlier regional model), and, for example, the Chile station AU.MAW, dropped by hand in the
-published run, is now handled automatically.
+`frozen` mode repeats the bundled chains. Run again with 32 MPI ranks and the same compiler, on
+the same server or on another one, the frozen modes of California, Chile and Venezuela wrote the
+chain files of the bundled runs byte for byte (160, 160 and 192 files), and their L-curves agreed
+with the bundled ones in every printed digit. With another number of ranks (`SUBMIT_NCORE`; the
+default is the number of physical cores, at most 32) or another compiler the chains differ, and the
+misfits agree within the search noise that Section 4.6 measures. `full` mode starts from the
+bundled step-1 records (`inputs.tar.gz`) and the archived aftershock catalog and moment tensor
+(`catalog/`), and derives everything else again: station screening, weights, bounds, Green's
+functions, priors and the grid of subevent counts. On another server the `full` mode of California
+also ended with the L-curve and the 160 chain files of the bundled run.
 
 ---
 
@@ -207,15 +232,15 @@ published run, is now handled automatically.
 
 | example | earthquake | depth | selected subevents | total Mw (catalog) | best misfit |
 |---------|-----------|-------|:------------------:|:------------------:|:-----------:|
-| `chile` | 2024-07-19 Chile–Argentina border | 123 km (intraslab) | **4** | 7.41 (7.4) | 0.869 |
-| `california` | 2024-12-05 offshore Cape Mendocino | shallow strike-slip | **3** | 7.04 (7.0) | 1.791 |
-| `venezuela` | 2026-06-24 near the coast of Venezuela | shallow | **6** | 7.58 (7.2) | 3.072 |
-| `kamchatka` | 2025-07-29 Kamchatka megathrust | shallow subduction | **7** | 8.83 (8.8) | 1.107 |
+| `chile` | 2024-07-19 Chile–Argentina border | 123 km (intraslab) | **4** | 7.41 (7.4) | 0.732 |
+| `california` | 2024-12-05 offshore Cape Mendocino | shallow strike-slip | **4** | 7.04 (7.0) | 1.499 |
+| `venezuela` | 2026-06-24 near the coast of Venezuela | shallow, a doublet | **5** | 7.59 (7.2 and 7.5) | 2.056 |
+| `kamchatka` | 2025-07-29 Kamchatka megathrust | shallow subduction | **7** | 8.84 (8.8) | 0.819 |
 
 They were chosen to span the problems the method has to handle: a deep event whose depth phases
-arrive late (Chile), a strike-slip event with a dense regional network (California), a
-complex event that appears to combine smooth, slower slip with short, sharp ruptures (Venezuela) and a 450-km-long
-megathrust rupture (Kamchatka). Misfit values are only comparable between runs of the *same*
+arrive late (Chile), a strike-slip event with a dense regional network (California), a doublet of
+two earthquakes 30 s and 150 km apart (Venezuela) and a megathrust rupture more than 350 km long
+(Kamchatka). Misfit values are only comparable between runs of the *same*
 event ([why](#misfit)). Detailed results are in [Section 6](#6-results-of-the-examples).
 
 ---
@@ -423,40 +448,165 @@ With resampling, 10–16 of 16 chains ended within 2% of the best in seven of th
 reached best misfits of 1.840 and 1.844 with two seeds; an earlier version of it, which redrew
 infeasible proposals, reached 1.761, 1.840 and 1.847, the lowest with the third subevent east of the
 epicenter instead of west of it. A mode 4.5% below the usual one, found in 1 of 5 runs, is nearly as
-wide as the 5% selection band of Section 4.6. After the last round every chain descends from one
-island, so the agreement of the chains says nothing about this spread. The
-islands are independent searches until that round, and their best misfits
-(`island_best_misfits.txt`) are what Section 4.6 uses to test the selection.
+large as the 5% that Section 4.6 asks of a subevent. After the last round every chain descends from
+one island, so the agreement of the chains says nothing about this spread. The islands are
+independent searches until that round, and `lcurve.txt` lists their best misfits
+(`island_best_misfits.txt`) for every $`N`$.
 
 Chain lengths grow with $`N`$: 3000·N burn-in iterations and 1000·N samples. The collective steps
 happen at fixed iteration counts, so a rerun with the same number of ranks, compiler and machine
 repeats the same chains (two 4-rank runs under different machine load, 47 s and 83 s, wrote
-identical files).
+identical files). A second machine with the same compiler repeated them too: the whole California
+run from the raw downloads, with 32 ranks and five subevent counts, wrote 160 byte-identical chain
+files on two servers.
 
 ### 4.6 How many subevents?
 
 More subevents always fit the data at least as well, so the inversion is repeated for
-$`N = 1, 2, 3, \dots`$ and the answer is the **smallest $`N`$ whose best misfit is within 5% of the
-best misfit over all $`N`$**. If that is the largest $`N`$ tried, the grid is extended automatically,
-up to a limit of 7 subevents (`max_subevent_count` in `./submit`). Models with more subevents are
-hard to interpret as distinct ruptures: in the v3 rerun of the Mw 8.8 Kamchatka example, the two
-independent 8-subevent searches disagreed (0.775 and 0.801) while the 7-subevent ones agreed (0.8197
-and 0.8198). A selection at the limit is reported in `lcurve.txt` as a lower bound.
+$`N = 1, 2, 3, \dots`$ and a rule has to decide which subevents the data pay for.
 
-**How reproducible is the selection?** The rule compares the best misfit of each $`N`$, so it is
-only as reliable as the search that found those bests. In the v2 run of the 2026 Panama test event,
-$`N = 2`$ was selected because one of 16 chains reached a misfit of 1.530; the median chain's best
-was 17% worse, and without that chain the rule picks $`N = 3`$. Therefore, `plot_lcurve.py`
-bootstraps the independent searches of every $`N`$ (the islands of Section 4.5; the chains for v2
-runs) 1000 times and reports the share of resamples that select each $`N`$. A winner below 80% is
-flagged in `lcurve.txt` as `WARNING: unstable selection`; the remedy is more MPI ranks, or a rerun
-of the deciding $`N`$ with another seed (`rank.dat`), and reporting both candidates. An island's
-best is the lowest misfit it visited during the burn-in, and the best misfit of the L-curve is the
-best sample after the burn-in, which is the model reported. An island best can therefore lie slightly
-below it, by up to 0.5% in the v3 reruns of the four examples. The warm start
-of Section 4.5 also makes the curve fall more regularly: the search for $`N`$ starts from the misfit
-already reached with $`N-1`$, where v2 started every $`N`$ from scratch (the 2026 Colombia runs
-selected 5, 4, 3, 2 and 4 subevents under small configuration changes).
+**The rule.** The usual choice, and the one v2 made, is the elbow of the L-curve: the smallest
+$`N`$ whose best misfit is within 5% of the lowest misfit of all $`N`$. That rule charges nothing per
+subevent, and it measures every $`N`$ against the largest ones, whose searches are the hardest to
+finish. In the 32-rank v3 run of the Venezuela example it rejected 5 subevents because 7 fit 6.5%
+better, which is 3.3% per added subevent, and over three runs of that example it selected 6, 5 and
+6. Therefore, I select $`N`$ with the Akaike information criterion (AIC; Akaike, 1974), which
+charges every free parameter.
+
+The posterior of Section 4.5 already says what a change of the misfit is worth. Its
+$`\sigma = 0.05`$ is a relative noise level: a model whose misfit is 1% higher has $`e^{-2}`$ of the
+density, as if the data held $`n = 1/\sigma^2 = 400`$ independent values. For least squares with an
+unknown noise level the criterion is $`\mathrm{AIC} = n\ln(\mathrm{RSS}) + 2K`$ (Burnham & Anderson,
+2002), where RSS is the residual sum of squares and $`K`$ the number of free parameters. A subevent
+has $`k = 10`$ of them: five moment-tensor components, centroid time, duration, depth and two
+horizontal coordinates. With the misfit in the place of RSS,
+
+```math
+\mathrm{AIC}(N) \;=\; \frac{\ln \Phi_N}{\sigma^2} + 2kN ,
+```
+
+where $`\Phi_N`$ is the best misfit found with $`N`$ subevents
+(`programs/prepare_SubMIT/plot_lcurve.py`). In words: **a subevent costs $`2k\sigma^2 = 5\%`$ of
+misfit** (exactly: $`\ln\Phi`$ has to fall by 0.05, a misfit 4.9% lower, for the AIC to stay equal).
+The 5% is no longer a separate choice: it follows
+from the noise level that the posterior assumes and from the size of a subevent. The misfit is not
+a plain sum of squares (Section 4.4) and $`\sigma`$ is an assumed noise level, so this is a
+consistent price for a subevent and not an exact statistical test.
+
+**Ties.** The usual reading of the AIC takes the $`N`$ with the lowest value. Two 32-rank searches
+of California that differ only in the seeds of their chains showed that this is not enough. The
+fifth subevent lowered the misfit by 4.8% in one search and by 5.0% in the other, on the two sides
+of the 4.9% that it costs, so the lowest AIC was at 4 subevents in the first and at 5 in the
+second. Models whose AIC differs by less than 2 are equally supported (Burnham & Anderson, 2002).
+Therefore, every $`N`$ whose AIC is within 2 of the lowest counts as tied, `lcurve.txt` names them,
+and **the selection is the smallest of the tied $`N`$**: a larger $`N`$ has to be clearly better.
+Both California searches name the tie of 4 and 5, and both select 4. In two more searches the
+fifth subevent changed the misfit by −1.8% (16 ranks) and by +1.3% (32 ranks, a wider centroid
+range; [Section 6](#6-results-of-the-examples)). The models say the same.
+The two 4-subevent models agree in time and place: every subevent lies within 0.35 s and 9 km of
+its counterpart (the fourth differs in depth, 16 against 4 km). The two 5-subevent models place
+their fourth subevent 46 km apart. Venezuela's sixth subevent is the other
+tie of the examples (32 ranks: it lowers the misfit by 4.8%, an AIC 0.2 above that of five
+subevents). The best misfit of each $`N`$ is what a stochastic search found, so it is an upper
+bound of the true minimum, and larger $`N`$ are harder to search. A tie can therefore end in a
+deeper search, and both numbers should be reported.
+
+Selected $`N`$ of every run of the four examples, with the 5% band and with the rule above:
+
+| example | published v2 run | v3, 16 ranks | v3, 32 ranks | v3, 32 ranks, other seeds |
+|---------|:----------------:|:------------:|:------------:|:-------------------------:|
+| California | 3 → 3 | 4 → 4 | 5 → **4** | 5 → **4** |
+| Chile | 4 → 4 | 4 → 4 | 4 → 4 | 4 → 4 |
+| Venezuela | 6 → **5** | 5 → 5 | 6 → **5** | 5 → 5 |
+| Kamchatka | 7 → 7 | 7 → 7 | 7 → 7 | 7 → 7 |
+
+With the band, the independent v3 searches of California and of Venezuela disagreed. With the rule
+above every example gives the same $`N`$ in all of them. In the 21 v3 runs of nine
+earthquakes made so far (the four examples, and the five test events of
+[What changed in v3](#what-changed-in-v3)), every subevent that was kept lowered the misfit by at
+least 7.0%, and the first one that was rejected lowered it by at most 5.0%.
+
+If the AIC is lowest at the largest $`N`$ tried, the grid is extended automatically, up to a limit
+of 7 subevents (`max_subevent_count` in `./submit`). The lowest AIC decides this, not the
+selection: with 4 and 5 tied on a grid that ends at 5, stopping would never try the 6 subevents
+that might be clearly better than both. Models with more than 7 subevents are hard to
+interpret as distinct ruptures: in the v3 rerun of the Mw 8.8 Kamchatka example, the two independent
+8-subevent searches disagreed (0.775 and 0.801) while the 7-subevent ones agreed (0.8197 and
+0.8198). An AIC that is still lowest at the limit is reported in `lcurve.txt` as a lower bound.
+
+**A best model on the bound of its range.** One condition comes before the AIC. In the Vanuatu
+test event of [What changed in v3](#what-changed-in-v3), three subevents fit 11% better than one,
+and two searches agreed on them. Both put the third subevent at 28.0 s of a centroid range that
+ends at 28 s, at the east edge of the search box. From two to three subevents the P and SH misfits
+rose, and the misfit of the three regional stations fell from 0.54 to 0.31. A subevent in the
+corner of its search range is a constrained optimum: it fits later moment release, or arrivals that
+the model does not predict, from the edge of what the range allows. Therefore, an $`N`$ whose best
+model has its last subevent in the last 1% of the centroid range is listed with `bound` in the place
+of its AIC, drawn as a hollow point in `lcurve.pdf`, and cannot be selected. Vanuatu then selects
+one subevent in both searches. For one subevent the pipeline widens the range by itself
+([Section 5](#5-the-automated-pipeline)); for more, the range and the windows are raised by hand
+([Section 11](#11-troubleshooting)), because a wider range also gives such a subevent more room.
+In Vanuatu, with the range widened to 55 s, it settles at 31.5 s at the top of the depth grid, 60 km
+above the first two subevents, and its P wave arrives between their pP phases
+([PITFALLS D5](PITFALLS.md#d5--a-subevent-in-the-corner-of-its-search-range-won-the-selection)):
+it looks like depth-phase energy that the model does not predict, and whether to keep it is a
+decision for the user.
+**Two searches that agree show that the search repeats, not that its best model is free of its
+bounds.**
+
+**How well was each $`N`$ searched?** `lcurve.txt` lists two things for every $`N`$: the number of
+chains that ended within 1% of the best, and the best misfit of each island before the last
+resampling round (Section 4.5). An island best can lie a little below the best misfit of its row
+(second California search, 6 subevents: 1.3504 against 1.3572), because the best misfit is the best
+sample after the burn-in and the burn-in passes through models that the sampling does not visit
+again. The warm start needs room. The new subevent has to lie 2.5 s from
+its neighbors in time, and California's 4-subevent model (centroid times 5.2, 8.5, 12.8 and 15.4 s
+in a search range that ends at 16 s) leaves none. Its 5- and 6-subevent searches therefore started
+from the prior on every chain (step 3 prints that count after each inversion), their islands ended
+15% apart and more, and from 5 to 6 subevents the misfit rose. The two California searches also
+measure how far a search is from the minimum: with the same data and configuration and other seeds,
+their best misfits differ by 5.4% at 2 subevents (1.890 and 1.792, both searches started from the
+prior) and by 1.4–1.6% at 4 and 5. A step of the L-curve is known no better than that, which is one
+more reason to ask a larger $`N`$ for a clear gain. v2 started every $`N`$ from the
+prior, and its curves rose and fell from one $`N`$ to the next: a v2 rerun of the bundled Chile
+example ended its 4-subevent search at 0.948, above the 3-subevent 0.897, and selected 3 subevents
+where the published run, on the same inputs, selected 4.
+
+**Insight: the number of subevents is a model-selection problem, and its threshold is not a free
+choice. The noise level that the posterior already assumes sets the price of a subevent, and when
+two numbers tie, the smaller one is the model that independent searches agree on.**
+
+**What moves the L-curve?** The rule compares penalized misfits, and a penalized misfit is the
+product of three factors (Section 4.4): the data misfit $`\chi`$, the CLVD factor
+$`e^{\bar\epsilon/\kappa}`$ and the stress factor. A drop from $`N`$ to $`N+1`$ can therefore come
+from a better fit to the data or from a smaller penalty, and the two mean different things.
+Therefore, after each inversion step 3 re-evaluates the best sample of every chain with the forward
+code and writes its three factors to `misfit_components.txt`
+(`programs/prepare_SubMIT/evaluate_misfit_components.sh`). `lcurve.txt` lists them for the best
+model of each $`N`$, and `lcurve.pdf` draws them next to the L-curve, with the worst P/T-axis
+rotation that the stress penalty acts on. A run that was sampled with other code re-evaluates
+differently on every chain, and its factors would not multiply to the L-curve, so the table is
+written only if the median chain agrees with its sampled misfit within 1%. Of the 944 chain bests
+of the v3 reruns of the four examples (16 and 32 MPI ranks), all but one agreed within 0.1%; that
+one (0.15%, a 1-subevent sample of the 32-rank Venezuela run) is stored with 4 decimals next to a
+jump of the misfit. In those reruns the factors showed three things:
+
+- The stress factor was 1.000 for the best model of every example and every $`N`$, while the worst
+  axis sat at 26–30° from 2 subevents on in California and Venezuela and from 4 on in Chile (15–21°
+  in Kamchatka). The 30° cone acts as a limit that the best models lean on, not as a cost they pay.
+- California's choice between 4 and 5 subevents rested on the data misfit alone. From 4 to 5
+  subevents the data misfit fell 6.6% and the CLVD factor rose 1.9%. Two independent searches (16
+  and 32 ranks) agreed on the CLVD factor within 0.2% at both $`N`$, but their data misfits were 2.3%
+  apart at $`N = 4`$ and 5.4% at $`N = 5`$: the 5-subevent search had not converged.
+- The CLVD penalty can create a second solution. At 3 subevents, Chile's 16-rank search kept the
+  three mechanisms aligned (worst axis 6°) but not double-couple (data misfit 0.697 × CLVD factor
+  1.150 = 0.802); the 32-rank search made them double-couple and turned one to the 30° limit
+  (0.835 × 1.005 = 0.840). Of Chile's 26% drop from 2 to 4 subevents, 18% is the data misfit and 10%
+  the CLVD factor (1.146 → 1.032): several double-couple subevents can add up to the
+  non-double-couple total moment tensor, which a single subevent cannot.
+
+**The penalties decide where the best models sit; whether a selection is stable depends on how
+well the search fits the data at the deciding $`N`$.**
 
 ![Model selection for the four examples](docs/figures/model_selection.png)
 
@@ -479,9 +629,9 @@ What each automatic decision does, and why it matters:
 | **Green's functions** | depth grid centered on the catalog depth, wider for deep events (half-width from the Wells & Coppersmith, 1994, rupture length) | subevents of deep ruptures can be 50 km apart in depth |
 | **Aftershock prior** | USGS aftershocks above a magnitude floor; background seismicity removed with a Poisson test against the year before; small clusters dropped; gaps between the surviving clusters bridged with weak smooth corridors | keeps subevents where the fault actually slipped; corridors to dropped clusters once opened 40% of the Kamchatka grid instead of 16% ([PITFALLS C1](PITFALLS.md#c--prior)) |
 | **Windows** | long enough for the whole rupture plus, for deep events, the depth phases (pP, sP) | a 120-km-deep event's sS arrives ~60 s after S |
-| **1-subevent calibration** | the 1-subevent solution sets the time range searched for N ≥ 2 and the window lengths | stops late subevents from fitting noise |
+| **1-subevent calibration** | the 1-subevent solution sets the time range searched for N ≥ 2 and the window lengths. If its centroid lies on the upper bound of the range that the magnitude gave, that range is first doubled for every N and the 1-subevent inversion repeated | stops late subevents from fitting noise; a rupture whose main energy comes later than its magnitude suggests is otherwise cut off (2026 Colombia: the range ended at 31 s, every chain ended on that bound, and the 1-subevent centroid lies at 49.5 s once the range allows it) |
 | **Wave-type weights** | P, SH and regional weights are iterated until their contributions to the misfit are about 1.2 : 1 : 1 | otherwise the nearest, largest records drown the rest |
-| **Screening, stage 2** | stations that anti-correlate with the 1-subevent prediction (flipped polarity) or are ×4 off in amplitude (wrong gain) are removed | these errors only show up against a model |
+| **Screening, stage 2** | stations that anti-correlate with the 1-subevent prediction (flipped polarity) or are ×4 off in amplitude (wrong gain) are removed. So is any record whose rms in the band and window of the inversion is more than 8 times the median of its group, a test that needs no model | the first two errors only show up against a model; the third test removed a drifting record that carried 68% of the P misfit (2026 Vanuatu, IM.IL31) |
 | **Consistent scoring** | the 1-subevent inversion is repeated with the calibrated windows, weights and stations | the number of subevents is chosen by comparing misfits, which is only fair if every N is scored on the same data |
 
 ![Data processing](docs/figures/data_processing.png)
@@ -497,11 +647,11 @@ what `./submit` does):
 bash ../programs/step2_prepare_inversions.sh        # screening, GFs, priors, configuration
 bash ../programs/step3_do_inversions.sh             # N = 1, 1-subevent calibration, N = 1..5
 bash ../programs/step3_do_inversions.sh 6           # only N = 6 (folder inv_<event>_6sub must exist)
-python ../programs/prepare_SubMIT/plot_lcurve.py    # L-curve, selected N, reproducibility
+python ../programs/prepare_SubMIT/plot_lcurve.py    # L-curve and the selected N
 bash ../programs/step4_figures.sh 4                 # forward model + figures for N = 4
 ```
 
-`./submit run` creates the folder of a further $`N`$ by itself when the selection lands on the
+`./submit run` creates the folder of a further $`N`$ by itself when the AIC is lowest at the
 largest $`N`$ tried. Every stage stops the pipeline when it fails; v2 ran its stages through
 `awk ... | sh`, which discarded their exit codes ([PITFALLS E3](PITFALLS.md#e--systems)).
 
@@ -509,10 +659,24 @@ largest $`N`$ tried. Every stage stops the pipeline when it fails; v2 ran its st
 
 ## 6. Results of the examples
 
-These results were computed with v2, before the corrections listed in
-[What changed in v3](#what-changed-in-v3). The timing of the teleseismic synthetics has changed
-since, and some SH records of every example were unrotated. The two caveats that affect an
-interpretation are marked below (Venezuela, Kamchatka).
+These are v3 results. Each example was run on 2026-11-17 from its raw downloads
+(`./submit prepare`, then `./submit run`, 32 MPI ranks), and `examples/<name>/` holds that run. They
+replace the v2 results that this section showed before, and each subsection says what changed.
+
+| example | subevents (v2) | best misfit | chains within 2% of the best | largest split R-hat | mean correlation P / SH / regional |
+|---------|:--------------:|:-----------:|:----------------------------:|:-------------------:|:----------------------------------:|
+| `chile` | 4 (4) | 0.732 | 26 of 32 | 2.4 | 0.72 / 0.91 / 0.59 |
+| `california` | 4 (3) | 1.499 | 32 of 32 | 2.1 | 0.50 / 0.74 / 0.35 |
+| `venezuela` | 5 (6) | 2.056 | 17 of 32 | 2.8 | 0.51 / 0.38 / 0.63 |
+| `kamchatka` | 7 (7) | 0.819 | 21 of 32 | 7.2 | 0.69 / 0.69 / 0.04 |
+
+The correlation is the mean, over the records of a wave type, of the correlation coefficient
+between a record and its prediction (`reference/sta_residual.dat`). The split R-hat compares the
+chains with each other for every parameter (`reference/RESULTS.md`); above 1.1 the chains disagree.
+In all four examples most chains reach the best misfit within 2%, and the chains still disagree on
+some parameters (Kamchatka: the centroid times of the fifth and sixth subevents, which overlap in
+time). The best models below are what the searches agree on; the error bars of the parameters with
+a large R-hat are not converged.
 
 For each example, the main figure shows the subevents in map view (beachballs = moment tensors,
 error bars = 95% intervals from the MCMC ensemble, ★ = epicenter), the moment-rate functions, the
@@ -534,11 +698,16 @@ diagnostics:
 
 ![Chile](docs/figures/chile_subevents.png)
 
-Four subevents within ~17 s. Horizontally they stay within 15 km of the epicenter, but their
-depths step from 126 km to 170 km: the rupture grew mainly **downward** through the subducting
-slab. This event (the "2024 Mw 7.4 Calama earthquake") was studied in detail with SubMIT by
-Jia et al. (2025a), who found five subevents over ~20 s at 125–174 km depth. Here the 5-subevent
-model fits only 1.4% worse than the 4-subevent one, and the 5% rule prefers the simpler model.
+Four subevents of Mw 6.9–7.1 within ~19 s. The first three lie within 10 km of the epicenter, at
+depths of 142, 153 and 170 km: the rupture grew mainly **downward** through the subducting slab.
+The fourth lies 23 km to the east-northeast, at 163 km depth. This event (the "2024 Mw 7.4 Calama
+earthquake") was studied in detail with SubMIT by Jia et al. (2025a), who found five subevents over
+~20 s at 125–174 km depth. Here a fifth subevent does not lower the misfit (0.737 against 0.732),
+in each of the three v3 searches.
+
+*Against v2:* the same number of subevents and the same downward growth. The first subevent is
+deeper (142 km, v2: 126 km), and the fourth lies 23 km from the epicenter, where v2 had it 15 km to
+the north.
 
 ![Chile: stations used](docs/figures/chile_stations.png)
 
@@ -567,15 +736,22 @@ model fits only 1.4% worse than the 4-subevent one, and the 5% rule prefers the 
 
 ![Kamchatka](docs/figures/kamchatka_subevents.png)
 
-Seven thrust subevents (Mw 8.1–8.5) over ~230 s. After a first subevent at the epicenter and a
-second ~80 km to the north, the rupture ran **~450 km to the south-southwest** along the
-trench. All seven mechanisms agree with the overall thrust mechanism (tensor similarity ≥ 0.94).
+Seven thrust subevents (Mw 8.0–8.4) over ~175 s. The rupture ran **~370 km to the south-west**
+along the trench: a first subevent at the epicenter at 32 s, a second 61 km away at 63 s, two near
+210–220 km at 96–112 s, two near 320 km at 116–133 s and the last at 368 km at 156 s. The moment
+rate peaks at about 115 s. Six of the seven mechanisms agree with the total thrust mechanism
+(tensor similarity ≥ 0.95; the second: 0.78). Seven is the limit of the grid: the AIC is still
+falling there, so seven is a lower bound ([Section 4.6](#46-how-many-subevents)). A second search
+with other chain seeds ended at the same misfit (0.8189 against 0.8193) and with the same first
+three subevents, within 2 s and 30 km. The other four cover the same stretch of the trench, 220 to
+390 km from the epicenter at 112–161 s, and the two searches divide it differently.
 
-> **Caveat (November 2026).** The aftershock prior of this run contained 141 spurious corridors
-> to clusters that the prior had removed ([PITFALLS C1](PITFALLS.md#c1--prior-corridors-re-attached-to-zeroed-speckle)):
-> it covered 40% of the search grid instead of 16%. The second subevent (~80 km north) and the
-> sixth lie where the corrected prior is zero, so the rupture path above has to be re-examined
-> with v3.
+*Against v2:* the v2 model had its second subevent ~80 km north of the epicenter, on one of the 141
+spurious corridors of its aftershock prior
+([PITFALLS C1](PITFALLS.md#c1--prior-corridors-re-attached-to-zeroed-speckle)), and its last one at
+212 s, 450 km to the south-southwest. With the corrected prior, which covers 16% of the search grid
+instead of 40%, all seven subevents lie along the trench to the south-west, and none is later than
+156 s. The 16-rank v3 run agrees: its models with 7 and 8 subevents end at 162 and 163 s.
 
 ![Kamchatka: stations used](docs/figures/kamchatka_stations.png)
 
@@ -594,7 +770,7 @@ trench. All seven mechanisms agree with the overall thrust mechanism (tensor sim
 
 ![Kamchatka SH-wave fits](docs/figures/kamchatka_fits_SH.png)
 
-**Regional three-component records**; only two regional stations, with a small weight, so this event relies mainly on teleseismic data:
+**Regional three-component records**; one regional station (IU.PET) with a small weight, so this event relies on teleseismic data:
 
 ![Kamchatka regional fits](docs/figures/kamchatka_fits_rayl.png)
 
@@ -604,21 +780,25 @@ trench. All seven mechanisms agree with the overall thrust mechanism (tensor sim
 
 ![Venezuela](docs/figures/venezuela_subevents.png)
 
-Six subevents over ~110 s propagating **~170 km east-northeast** along the coast. The subevents'
-moment-rate functions are **too spiky**: four of the six last only 3–5 s despite magnitudes of
-Mw 6.5–7.3, and the model fits the SH waves poorly (mean waveform correlation 0.26 for SH versus
-0.59 for P, whereas SH correlates at 0.62–0.91 in the other examples). This points to a rupture
-that was not only a cascade of short, high-frequency asperity failures but also had a **much
-smoother, longer-lasting rupture in the background**, which is expressed more strongly in the SH
-waves and which short point-source subevents cannot represent. The total moment (Mw 7.58) also
-exceeds the catalog Mw 7.2. We flag this event for further study.
+Five subevents over ~110 s. This earthquake is a **doublet**: the USGS catalog lists an Mw 7.2
+event at the epicenter and an M 7.5 event 30 s later, 147 km to the east. The pipeline finds the
+pair when it fetches the moment tensor, uses the sum of the two tensors as the reference mechanism
+and lowers the body-wave corner to 0.1 Hz (`programs/prepare_SubMIT/gen_totalmt.py`). The model
+puts a small subevent (Mw 6.5) at the epicenter at 16 s, and most of the moment in three subevents
+127–145 km to the east-northeast at 39–60 s (Mw 7.4, 7.2 and 6.9; together Mw 7.55), 33–37 km
+from the second epicenter. The largest of them lasts 24 s. A fifth subevent (Mw 7.0) follows at
+108 s, 177 km from the epicenter. The total, Mw 7.59, equals the moment of the two cataloged events
+together. Six subevents tie with five ([Section 4.6](#46-how-many-subevents)).
 
-> **Caveat (November 2026).** 26 of the 56 SH records of this model are unrotated north or east
-> components, not transverse ones ([PITFALLS A1](PITFALLS.md#a1--horizontals-of-unequal-length-left-unrotated)):
-> their mean correlation with the predictions is 0.17, against 0.34 for the correctly rotated
-> records. The poor SH fit, and with it the case for a smooth background rupture, is therefore at
-> least partly a data-processing error. The example has to be re-run with v3 before that
-> interpretation can stand.
+*Against v2:* v2 selected six subevents and spread them along the 170 km: its subevents at 35–43 s
+lay within 45 km of the epicenter, four of the six lasted only 3–5 s, and its SH fit was poor (mean
+correlation 0.26). I read that as a smooth rupture in the background of short asperity failures.
+That reading does not survive: 26 of the 56 SH records of that model were unrotated north or east
+components ([PITFALLS A1](PITFALLS.md#a1--horizontals-of-unequal-length-left-unrotated)). With
+all horizontals rotated, the moment released at 39–60 s lies 127–145 km from the epicenter, where
+the catalog has the second earthquake, the largest subevent is a long one (24 s), and the SH
+correlation is 0.38. That is still the lowest of the four examples: point sources describe the SH
+waves of this doublet less well than its P waves (0.51).
 
 ![Venezuela: stations used](docs/figures/venezuela_stations.png)
 
@@ -647,8 +827,23 @@ exceeds the catalog Mw 7.2. We flag this event for further study.
 
 ![California](docs/figures/california_subevents.png)
 
-Three strike-slip subevents within ~21 s; the third, ~15 s after the origin, lies ~50 km to the
-east-southeast. This matches the number of subevents of an earlier hand-tuned inversion.
+Four subevents within ~18 s. Three shallow strike-slip subevents of Mw 6.5–6.9 lie within 20 km
+east of the epicenter at 5–13 s; the second is the largest and lasts 8 s. The fourth (Mw 6.7), 15 s
+after the origin, lies ~50 km to the east-southeast at 16 km depth. Its north–south position,
+duration and depth are the least certain parameters of the model. Five subevents tie with four
+([Section 4.6](#46-how-many-subevents)), and two searches that found five disagree by 46 km on
+where one of them lies, so the four-subevent model is the one to read.
+
+Two limits of the search range touch this model. The first three subevents sit at 3 km, the top of
+the depth grid. The last subevent, at 15.4 s, lies 0.6 s before the end of the centroid range
+(16 s, set by the 1-subevent calibration), so no subevent can follow it. Therefore, I ran 4 and 5
+subevents again with that range widened to 22 s. The four subevents stayed where they were (the
+last at 15.8 s, the misfit 0.25% lower), and a fifth subevent, at 17.6 s, raised the misfit by
+1.3%. The range does not hide a later subevent.
+
+*Against v2:* v2 selected three subevents: two near the epicenter at 4.5 and 7.7 s, and one at
+14.9 s, ~50 km to the east-southeast. v3 keeps these three and adds one between them, at 12.8 s and
+20 km east of the epicenter.
 
 ![California: stations used](docs/figures/california_stations.png)
 
@@ -667,7 +862,7 @@ east-southeast. This matches the number of subevents of an earlier hand-tuned in
 
 ![California SH-wave fits](docs/figures/california_fits_SH.png)
 
-**Regional three-component records** (first of 7 pages):
+**Regional three-component records** (first of 8 pages):
 
 ![California regional fits](docs/figures/california_fits_rayl.png)
 
@@ -857,17 +1052,19 @@ The results are in `IRIS/<event>/data/` (`*.r`, `*.t`, `*.z`) and `IRISloc/<even
 (`*.e`, `*.n`, `*.z`). Rejected records are kept, so you can see what was removed: those with a
 low signal-to-noise ratio in `Vel/rtr/bad_data/` (teleseismic) or `Vel/enz/bad_data/`
 (regional) inside the event folder, and the others in `Vel/rtr/others/` or `Vel/enz/others/`.
-This is the form in which the examples are bundled (`examples/<name>/inputs.tar.gz`). Running
-`prepare` (plus `fetch-csn` for `chile`) on the original Wilber downloads of the four examples
-reproduces those files except where v3 corrects them. Horizontal pairs of unequal length are now
-rotated, which changes the radial and transverse records of 13 (Chile), 11 (California),
-60 (Venezuela) and 8 (Kamchatka) files, and moves a few stations across the signal-to-noise
-threshold (Venezuela GE.KBS in, GE.MATE out; Kamchatka G.CAN in). The regional sets gain stations
-(California CE.89688, Chile C1.GO02, and 12 Kamchatka stations beyond 750 km, which the inversion
-ignores) and keep one sensor per site (Kamchatka IU.PET.00 only).
-`python tools/compare_step1_outputs.py /data/rerun examples/<name>/inputs.tar.gz` lists these
-differences, and the radial and transverse records that are still unrotated (62 of the bundled
-Venezuela records, none after v3). Step 2 then screens the records again, more strictly
+This is the form in which the examples are bundled (`examples/<name>/inputs.tar.gz`): the step-1
+results of their v3 runs. Running `prepare` (plus `fetch-csn` for `chile`) on the original Wilber
+downloads of the four examples reproduces those files. They differ from the inputs that v2 bundled
+where v3 corrects step 1. Horizontal pairs of unequal length are now rotated, which changed the
+radial and transverse records of 13 (Chile), 11 (California), 60 (Venezuela) and 8 (Kamchatka)
+files, and moved a few stations across the signal-to-noise threshold (Venezuela GE.KBS in, GE.MATE
+out; Kamchatka G.CAN in). The regional sets gained stations (California CE.89688, Chile C1.GO02,
+and 12 Kamchatka stations beyond 750 km, which the inversion ignores) and keep one sensor per site
+(Kamchatka IU.PET.00 only).
+`python tools/compare_step1_outputs.py /data/rerun examples/<name>/inputs.tar.gz` lists the
+differences between a rerun and the bundled files, and the radial and transverse records that are
+unrotated (62 of the Venezuela records that v2 bundled, none now). Step 2 then screens the records
+again, more strictly
 ([Section 5](#5-the-automated-pipeline)).
 
 ### 7.6 Data that the pipeline downloads by itself
@@ -883,10 +1080,10 @@ Venezuela records, none after v3). Step 2 then screens the records again, more s
 
 | example | teleseismic (`BH?`) | regional | regional networks |
 |---------|---------------------|----------|-------------------|
-| `chile` | 103 `BHZ` channels at 41°–88° → 59 stations kept | `HN?`, 8 stations at 0.4°–4.8° from Wilber + 53 from CSN → 56 kept | C1 |
-| `california` | 129 `BHZ` channels at 42°–90° → 75 stations kept | `HN?`, 98 stations at 0.5°–2° → 96 kept | BK, CE, NC, RE, UO, UW |
+| `chile` | 103 `BHZ` channels at 41°–88° → 59 stations kept | `HN?`, 8 stations at 0.4°–4.8° from Wilber + 53 from CSN → 57 kept | C1 |
+| `california` | 129 `BHZ` channels at 42°–90° → 75 stations kept | `HN?`, 98 stations at 0.5°–2° → 97 kept | BK, CE, NC, RE, UO, UW |
 | `venezuela` | 117 `BHZ` channels at 42°–90° → 67 stations kept | `HN?`, 26 stations at 2.5°–8° → 22 kept | CM, PR |
-| `kamchatka` | 152 `BHZ` channels at 40°–90° → 58 stations kept | `BH?` (no strong motion nearby), 54 stations at 1°–14.6° → 27 kept, of which only IU.PET (two sensors) is within 750 km | AV, IU |
+| `kamchatka` | 152 `BHZ` channels at 40°–90° → 59 stations kept | `BH?` (no strong motion nearby), 54 stations at 1°–14.6° → 38 kept, of which only IU.PET is within 750 km | AV, IM, IU |
 
 Teleseismic networks: AU, BK, CI, CN, CU, G, GE, GT, IC, II, IM, IU, MN, NL, PS. All networks
 are listed with their DOIs in [Section 13](#13-credits-citation-and-licenses). Please cite them when
@@ -943,14 +1140,14 @@ step 2 thins the densest networks.
 | `RESULTS.md` | summary: selected N, misfits, subevent table with uncertainties, total moment |
 | `subevents.png/.pdf` | the figure shown in Section 6 |
 | `stations.png/.pdf` | stations used: teleseismic P and SH (global map) and regional (local map) |
-| `lcurve.pdf/.txt` | misfit against the number of subevents, the selection, and the share of the replicate bootstrap that selects each N (Section 4.6) |
+| `lcurve.pdf/.txt` | misfit against the number of subevents, how much each subevent lowered it, the AIC that selects N (in the figure the star; the dashed line through it falls 5% per subevent, the cost of a subevent; hollow points are N that cannot be selected), the island bests, and the three factors of each best misfit (data misfit, CLVD factor, stress factor) with the worst axis rotation (Section 4.6) |
 | `fits_P.pdf`, `fits_SH.pdf`, `fits_Pvel.pdf`, `fits_rayl.pdf` | data (black) vs prediction (red) at every station, with correlation coefficients |
 | `histoplot_py.pdf` | posterior distributions of every subevent parameter |
 | `misfit_evolution.pdf` | misfit along each Markov chain |
 | `convergence.txt` | chains within 1, 2 and 5% of the best misfit, and the split R-hat of every parameter (values well above 1.1 mean the chains disagree) |
 
 Per-N details are in `IRIS/inv_<event>_<N>sub/` (`best_model_hybrid.dat`, chains, logs,
-`island_best_misfits.txt`) and
+`island_best_misfits.txt`, `misfit_components.txt`) and
 `IRIS/fwd_<event>_<N>sub/` (`fm.dat` = moment tensors in 10²⁷ dyne·cm as Mxx Mxy Mxz Myy Myz Mzz
 with x north, y east, z down; `Input.model` = time, x east, y north, duration, vr, θ, depth).
 
@@ -980,7 +1177,8 @@ repository in the assistant and ask, for example:
 | `ERROR: missing Green's function file` | a station has no Green's function; rerun the Green's-function stage or remove the station from `stations*.info` and update the `num_sta_*` counts in `Par.file` |
 | Python errors about `numpy`/`obspy` | `conda activate submit`, or set `SUBMIT_PYTHON` to that environment's `python3` |
 | `./submit check` reports that `mpirun` did not start `true` within 20 s | the MPI launcher hangs (the Open MPI launcher of the test machine did this even for `hostname`); use another MPI installation, for example Intel oneAPI |
-| `lcurve.txt` ends with `WARNING: unstable selection` | independent searches disagree on N (Section 4.6): rerun the deciding N with more MPI ranks (`SUBMIT_NCORE`) or another seed (`rank.dat` in the inversion folder), and report both candidates |
+| `lcurve.txt` reports `NOTE: a tie` | two or more numbers of subevents are equally supported, and the smallest is selected (Section 4.6): report them all. A run with more MPI ranks (`SUBMIT_NCORE`) searches the larger ones more thoroughly |
+| `lcurve.txt` reports that some N `cannot be selected` | the last subevent of their best model lies on the upper bound of the centroid range (Section 4.6). If the rupture may have lasted longer than that range, raise `cen_max` in `search_par.file` and `nd_timeP`, `nd_timeSH`, `nd_timeRayl` and `stf_etime` in `Par.file` by the same number of seconds in every `inv_<event>_<N>sub` folder, then run every N, the L-curve and the figures again with the commands of Section 5 (`bash ../programs/step3_do_inversions.sh 1 2 3 4 5` in `IRIS/`, then `plot_lcurve.py` and `step4_figures.sh`) |
 | `convergence.txt` lists split R-hat values well above 1.1 | the chains disagree on that parameter: it is poorly resolved, or the chains were too short (`burn_in`, `nsample` in `search_par.file`) |
 | need to stop a run | `sh programs/stop_step3.sh work/<name>/IRIS` (stops the step-3 driver *and* its MPI jobs; killing only the shell leaves them running) |
 
@@ -1008,15 +1206,17 @@ programs/               the package (paths inside are relative: keep this layout
                           regional instrument per station, decimation to 1 sample/s
   ChileArray/             optional download and conversion of Chilean CSN strong-motion records
   code_SubMIT/            the inversion: finv.f90 (MCMC), forward_model.c (data, Green's
-                          functions, forward model, moment tensors, misfit), ffwd.f90 (one
-                          forward run for the figures), prepare_stationinfo.py (station lists)
+                          functions, forward model, moment tensors, misfit), ffwd.f90 (forward
+                          runs for the figures and the misfit components), prepare_stationinfo.py
+                          (station lists)
   fwd_SubMIT/             figures and RESULTS.md
-  prepare_SubMIT/         screening, priors, weights, bounds, 1-subevent calibration, selection
+  prepare_SubMIT/         screening, priors, weights, bounds, 1-subevent calibration, selection,
+                          misfit components
   gf_SubMIT/              Green's-function drivers
   hist/                   posterior histograms, misfit evolution, convergence diagnostics
   fk3.2/ mtel3/ crust1.0/ TauP-2.0/   bundled third-party codes and models
 tools/                  comparison with the published results and the bundled step-1 inputs,
-                        README-figure scripts
+                        packaging of a finished run as an example, README-figure scripts
 docs/figures/           figures used in this README
 ```
 
@@ -1067,6 +1267,10 @@ SubMIT was developed by Zhe Jia. If you use it, please cite the method papers (J
 
 ### Other references used in this README
 
+* Akaike, H. (1974). A new look at the statistical model identification. *IEEE Transactions on
+  Automatic Control*, 19(6), 716–723. https://doi.org/10.1109/TAC.1974.1100705
+* Burnham, K. P., & Anderson, D. R. (2002). *Model Selection and Multimodel Inference: A Practical
+  Information-Theoretic Approach* (2nd ed.). Springer. https://doi.org/10.1007/b97636
 * Haario, H., Saksman, E., & Tamminen, J. (2001). An adaptive Metropolis algorithm. *Bernoulli*,
   7(2), 223–242. https://doi.org/10.2307/3318737
 * Kennett, B. L. N., & Engdahl, E. R. (1991). Traveltimes for global earthquake location and

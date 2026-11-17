@@ -17,6 +17,22 @@ excluded_stations_model.txt and moves flagged traces to data/excluded (and
 dataloc/excluded) in EVERY inv_<event>_*sub dir; rerun prepare_stationinfo
 and the weight balancing afterwards (step3 hook does both).
 
+A third screen needs no model (2026-11-17):
+
+- AMPLITUDE IN THE INVERSION BAND (2026 Vanuatu Mw 7.3: IM.IL31): the observed trace, filtered and
+  windowed as the inversion uses it (waveforms/*_obs_*.sac of the ffwd run), has an rms more than 8
+  times the median of its group (P displacement, P velocity, SH). Stage 1
+  (screen_station_amplitudes.py) screens the peak of the stored record with a median/MAD rule; the
+  drifting vertical record of IM.IL31 passed it at 12 times the median, inside the 3 MAD that the
+  scatter of that group allowed. In the band and window of the inversion its rms was 27 times the
+  median (the next record: 3.6 times) and it carried 68% of the P misfit: the best models of every
+  N then ran to the edges of the search box, and the misfit rose with every added subevent. In the
+  nine events run with v3 so far no other record exceeds 5.8 times its group median.
+  Until this date the whole screen was skipped when the 1-subevent result is unrepresentative
+  (calibrate_from_1sub.sh: duration below 30% of the magnitude scaling), which is the case for six
+  of those nine events and was the case here. Now only the two model-based screens are skipped
+  then (SCREEN_DATA_ONLY=1).
+
 usage: screen_stations_model.py <event_name>
 """
 import glob
@@ -31,6 +47,11 @@ CC_FLIP = 0.0        # best-alignment CC that is NEGATIVE at every shift =
                      # polarity/broken (2024 Chile: CN.DRLN -0.20, GE.SNAA
                      # -0.05; worst legitimate station +0.16)
 GAIN_FACTOR = 4.0    # |log10 obs/syn| beyond log10(4) from band median
+band_amplitude_factor = 8.0   # rms of an observed trace above this many times its group median: the
+                              # factor inside which stage 1 never flags a record (its MIN_FACTOR)
+minimum_group_size = 8        # smaller groups have no meaningful median (stage 1: MIN_GROUP)
+# the 1-subevent prediction is unrepresentative: only the screen that needs no model runs
+is_model_representative = not os.environ.get("SCREEN_DATA_ONLY")
 
 ev = sys.argv[1]
 fwd = f"fwd_{ev}"
@@ -61,6 +82,14 @@ def peak(f):
     except Exception:
         return 0.0
 
+
+def root_mean_square(sac_file):
+    try:
+        samples = read(sac_file)[0].data.astype(float)
+        return float(np.sqrt(np.mean(samples ** 2)))
+    except Exception:
+        return 0.0
+
 resid = parse_sta_residual(os.path.join(fwd, "sta_residual.dat"))
 report, flagged = [], set()
 
@@ -70,11 +99,16 @@ for band, info, obspat, synpat, comp in (
     files = station_files(info)
     rows = resid.get(band, [])
     ratios = {}
+    observed_rms_of_group = {}       # group ("displacement" or "velocity") -> {record file: rms}
     for idx, _, cc, _ in rows:
         j = idx - 1
         if j >= len(files):
             continue
         f = files[j]
+        group = "velocity" if os.path.basename(f).startswith("vel_") else "displacement"
+        observed_rms_of_group.setdefault(group, {})[f] = root_mean_square(os.path.join(fwd, "waveforms", obspat % j))
+        if not is_model_representative:
+            continue
         if cc < CC_FLIP:
             report.append(f"MODEL {band} {f} best CC {cc:.2f} < {CC_FLIP} (polarity?)")
             flagged.add(f)
@@ -82,6 +116,17 @@ for band, info, obspat, synpat, comp in (
         sy = peak(os.path.join(fwd, "waveforms", synpat % j))
         if o > 0 and sy > 0:
             ratios[f] = np.log10(o / sy)
+    # the amplitude of the records themselves, in the band and window of the inversion
+    for group, observed_rms in observed_rms_of_group.items():
+        positive_values = [value for value in observed_rms.values() if value > 0]
+        if len(positive_values) < minimum_group_size:
+            continue
+        group_median = float(np.median(positive_values))
+        for f, value in observed_rms.items():
+            if value > band_amplitude_factor * group_median:
+                report.append(f"DATA  {band} {f} rms x{value / group_median:.1f} of its group median in the "
+                              f"inversion band and window (drift or gain?)")
+                flagged.add(f)
     if ratios and not os.environ.get('STAGE2_POLARITY_ONLY'):
         med = float(np.median(list(ratios.values())))
         for f, r in ratios.items():

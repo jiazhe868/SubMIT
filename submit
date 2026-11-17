@@ -42,8 +42,9 @@ die()  { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 # Upper limit on the number of subevents: the default of --nmax and its maximum (decided
 # 2026-11-16). Models with 8 or more subevents are no longer interpretable as distinct ruptures, and
 # in the v3 rerun of the Mw 8.8 Kamchatka example the two independent 8-subevent searches disagreed
-# (0.775 and 0.801) while the 7-subevent ones agreed (0.8197, 0.8198). A selection at the limit is
-# reported as a lower bound (plot_lcurve.py). finv.f90 and forward_model.c keep array room for 9.
+# (0.775 and 0.801) while the 7-subevent ones agreed (0.8197, 0.8198). An AIC that is still lowest
+# at the limit is reported as a lower bound (plot_lcurve.py). finv.f90 and forward_model.c keep
+# array room for 9.
 max_subevent_count=7
 check_subevent_limit() {
     case $1 in ''|*[!0-9]*) die "--nmax needs a whole number (got '$1')" ;; esac
@@ -170,8 +171,12 @@ build_gfs() {
         || die "no Green's functions were produced (see IRIS/gf_$ev/*.log)"
 }
 
+# the L-curve (plot_lcurve.py) and its two numbers: the selected number of subevents (the smallest N
+# whose AIC is within 2 of the lowest) and the N with the lowest AIC, which decides whether the grid
+# is extended
 lcurve() { python ../programs/prepare_SubMIT/plot_lcurve.py | tee lcurve.log; }
-elbow()  { awk '/SUGGESTED/{print $NF}' lcurve.txt; }
+selected_subevent_count() { awk '/SUGGESTED/{print $NF}' lcurve.txt; }
+lowest_aic_subevent_count() { awk -F= '/^lowest AIC: N=/{print $2}' lcurve.txt; }
 
 # clone inv_(n-1) into inv_n for a grid extension (same configuration, one more subevent)
 extend_grid() {
@@ -180,7 +185,7 @@ extend_grid() {
     rm -rf "$t"; cp -r "$s" "$t"
     # burn_in and nsample scale with the number of subevents (get_search_par.py); copying them
     # unchanged from n-1 is what once "capped" the published chains at 6000
-    (cd "$t" && rm -f ./*best.dat best_model_* ./*chain.dat mpi.out island_best_misfits.txt allsamples.dat pooled_ensemble.dat ./*.o finv ffwd \
+    (cd "$t" && rm -f ./*best.dat best_model_* ./*chain.dat mpi.out island_best_misfits.txt misfit_components* allsamples.dat pooled_ensemble.dat ./*.o finv ffwd \
         && sed -i "s/^num_subevent= *[0-9]*/num_subevent= $n/" Par.file \
         && sed -i "s/^neq_min .*/neq_min $n/; s/^neq_max .*/neq_max $n/; s/^burn_in .*/burn_in $((3000 * n))/; s/^nsample .*/nsample $((1000 * n))/" search_par.file)
 }
@@ -197,15 +202,18 @@ run_pipeline() {
     [ "$quick" -eq 1 ] && set_short_chains
     lcurve
     n=$(ls -d inv_${ev}_*sub | sed 's/.*_\([0-9]*\)sub/\1/' | sort -n | tail -1)
-    while [ "$(elbow)" = "$n" ] && [ "$n" -lt "$nmax" ]; do
+    # one more N while the AIC is lowest at the largest N tried. The lowest AIC decides, not the
+    # selection: with 4 and 5 tied on a grid that ends at 5 the selection is 4, and stopping there
+    # would never try the 6 subevents that might be clearly better than both.
+    while [ "$(lowest_aic_subevent_count)" = "$n" ] && [ "$n" -lt "$nmax" ]; do
         n=$(( n + 1 ))
-        say "selection is at the edge of the grid - extending to $n subevents"
+        say "the AIC is lowest at the edge of the grid - extending to $n subevents"
         extend_grid "$ev" $n
         bash ../programs/step3_do_inversions.sh $n
         lcurve
     done
-    if [ "$(elbow)" = "$n" ]; then
-        echo "NOTE: the selection is at the limit of $nmax subevents; more subevents might fit better, so read $n as a lower bound"
+    if [ "$(lowest_aic_subevent_count)" = "$n" ]; then
+        echo "NOTE: the AIC is lowest at the limit of $nmax subevents; more subevents might fit better, so read $(selected_subevent_count) as a lower bound"
     fi
 }
 
@@ -258,7 +266,7 @@ cmd_run() {
     exec > >(tee -a "$D/submit.log") 2>&1
     echo "started $(date)  repo=$REPO"
     run_pipeline "$quick" "$nmax"
-    local nsel; nsel=$(elbow)
+    local nsel; nsel=$(selected_subevent_count)
     say "step 4: forward model + figures for the selected $nsel-subevent model"
     bash ../programs/step4_figures.sh "$nsel"
     echo "Figures and a results summary are in: $D/IRIS/figs_and_results/"
@@ -300,7 +308,7 @@ cmd_example() {
     if [ "$mode" = full ]; then
         [ $live -eq 1 ] || export SUBMIT_CATALOG_CACHE="$EX/$name/catalog"
         run_pipeline "$quick" "$subevent_limit"
-        nsel=$(elbow)
+        nsel=$(selected_subevent_count)
     else
         cp "$EX/$name/event_list.dat" .
         say "integrating teleseismic records to displacement"
@@ -320,7 +328,7 @@ cmd_example() {
                 bash ../programs/step3_do_inversions.sh $n
             done
             lcurve
-            nsel=$(elbow)
+            nsel=$(selected_subevent_count)
         else
             tar xzf "$fz/${nsel}sub/samples.tar.gz" -C "inv_${ev}_${nsel}sub"
             lcurve

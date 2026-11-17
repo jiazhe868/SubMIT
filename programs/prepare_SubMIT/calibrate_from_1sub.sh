@@ -19,10 +19,16 @@
 #    w <- w * sqrt(target/measured) on the forward model of the 1-subevent best model (at most 4
 #    times, to within 15%), renormalized to weightSH = 1. A regional set of <= 2 stations is a filler
 #    and keeps its weight (P and SH balance to 1.2 : 1 alone).
-# 3. model-based station screen (screen_stations_model.py): anti-correlation with the 1-subevent
-#    prediction (polarity: 2024 Chile GT.DBIC, CN.DRLN, GE.SNAA) and amplitude off by more than x4 from
-#    the band median (gain: CN.GAC). Only the polarity test runs for extended sources. Excluded traces
-#    leave every inversion folder; station lists and weights are then rebuilt.
+# 3. station screen on the forward run of the 1-subevent model (screen_stations_model.py):
+#    anti-correlation with the prediction (polarity: 2024 Chile GT.DBIC, CN.DRLN, GE.SNAA), amplitude
+#    off by more than x4 from the band median of obs/syn (gain: CN.GAC), and a record whose rms in the
+#    band and window of the inversion is more than 8 times the median of its group (2026 Vanuatu
+#    IM.IL31, a drifting record that carried 68% of the P misfit). Only the polarity test and the
+#    record test run for extended sources. When the 1-subevent result is unrepresentative (its
+#    duration below 30% of the magnitude scaling) the two tests against the prediction are skipped;
+#    the record test needs no model and still runs (until 2026-11-17 the whole screen was skipped
+#    then, which left that record in). Excluded traces leave every inversion folder; station lists
+#    and weights are then rebuilt.
 #
 # Exit status: 0 when the calibration ran or a stage was skipped for a stated reason, 1 when a stage
 # failed half-way (step 3 then stops instead of running N >= 2 on inconsistent configurations).
@@ -160,8 +166,8 @@ balance_weights
 # 3. model-based station screen, then re-balance on the cleaned station set
 # ------------------------------------------------------------------------------------------------
 if [ "$duration_too_short" -eq 1 ]; then
-    echo "calibrate screen: 1-subevent result unrepresentative (duration << magnitude scaling) - skipped"
-    exit 0
+    export SCREEN_DATA_ONLY=1
+    echo "calibrate screen: 1-subevent result unrepresentative (duration << magnitude scaling) - only the amplitude of the records is screened"
 fi
 if [ "$is_extended" = "1" ]; then export STAGE2_POLARITY_ONLY=1; fi
 rm -f excluded_stations_model.txt

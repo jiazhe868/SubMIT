@@ -7,12 +7,15 @@ Every entry is a defect of SubMIT v2 (GitHub commit 4ed2f61), of a fix proposed 
 the v3 rewrite itself (marked where it occurs), caught in November 2026: by a cohort bug report on
 the 2026 Mw 7.4 Colombia earthquake, by clean-environment runs (fresh clone, fresh conda
 environment) on three earthquakes the code had never seen (2026-10-09 Panama Mw 7.7, 2026-03-24
-Tonga Mw 7.5 at 234 km depth, 2025-12-08 Aomori Mw 7.6), and by an independent code review (F). Nothing below is a generic best-practice list. Where nobody is known
-to have believed a wrong explanation, "The false story" says so and names what made the defect easy
-to miss.
+Tonga Mw 7.5 at 234 km depth, 2025-12-08 Aomori Mw 7.6), by an independent code review (F), by
+running the four examples with v3 at 16 and at 32 MPI ranks, the latter with two sets of chain seeds
+(D3), by a second cohort report of 2026-11-16 on v2 reruns of four events (A6, D4), and by checking
+the repaired runs of that report (D5). Nothing below is a generic best-practice list. Where nobody
+is known to have believed a wrong explanation, "The false story" says so and names what made the
+defect easy to miss.
 
-**The organising observation: only two of the fourteen incidents stopped the pipeline (E1, E2). In
-ten, the pipeline ran to the end and drew plausible figures, and one of those (A1) was explained
+**The organising observation: only two of the eighteen incidents stopped the pipeline (E1, E2). In
+fourteen, the pipeline ran to the end and drew plausible figures, and one of those (A1) was explained
 away twice instead of being found: its unrotated SH records were removed as "polarity flips" and
 "gain errors", and the poor SH fit they caused was read as a smooth background rupture.**
 
@@ -29,12 +32,16 @@ Companion document: [README.md](README.md) explains the method and the pipeline.
 | A3 | regional signal-to-noise measured against the P coda | data integrity | every regional station of a deep event rejected |
 | A4 | clip rules carried over from one network | data integrity | 10 of 22 good Venezuela stations, and IU.PET, flagged as clipped |
 | A5 | a record at another sampling interval in the bundled inputs | data integrity | a 50-samples/s record read as if sampled every second |
+| A6 | a drifting record passed both station screens | data integrity | one record carried 68% of the P misfit of the Vanuatu run; the misfit rose with every added subevent |
 | B1 | teleseismic timing referenced to the depth of E1 | forward model | all teleseismic arrivals shifted by (z1 - evdp) x vertical slowness |
 | B2 | sP shifted twice | forward model | sP of a subevent 40 km from the reference about 3 s early |
 | B3 | 0/0 correlation and NaN misfits under -Ofast | forward model | chains frozen at NaN, memory read outside the trace |
 | C1 | prior corridors re-attached to zeroed speckle | prior | Kamchatka support 40% instead of 16%; two published subevents on corridors |
 | D1 | one lucky chain decides the number of subevents | sampling & selection | selected N not reproducible; ensembles that mix modes |
 | D2 | the 1-subevent consolidation stored a misfit of another model | sampling & selection | calibration runs whose recorded best did not belong to its model |
+| D3 | the selection rule charged nothing per subevent | sampling & selection | two searches of the same data selected different N (Venezuela 6, 5 and 6; California 4 and 5) |
+| D4 | the centroid range cut off a late main rupture | sampling & selection | every Colombia model on the bound of its search range; selected N between 1 and 5 |
+| D5 | a subevent in the corner of its search range won the selection | sampling & selection | Vanuatu selected 3 subevents in two searches; the third fitted three regional stations from the bounds of its range |
 | E1 | fresh clone has no greenFuncDir_disp; the clean-up then deletes every Green's function | systems | run aborts after the longest stage |
 | E2 | fixed array limits | systems | step 3 aborted for 108 and 232 teleseismic stations |
 | E3 | silent crashes hidden by unchecked exit codes | systems | Qt backend abort in caldens.py, orphaned MPI jobs, clobbered arguments |
@@ -187,6 +194,49 @@ their screens.
 **Generalisable lesson.** A reader that assumes a property of its input (here, the sampling
 interval) must check it; the earliest stage that can check it should set the record aside.
 
+## A6 — A drifting record passed both station screens
+
+**Symptom.** Vanuatu Mw 7.3, 121 km deep (second cohort report, v2; then v3 with 16 ranks and two
+seeds): the misfit rose from one subevent to two (v3: 2.03 to 2.32 and 2.02 to 2.22), the P
+misfit of the best 1-subevent model was 14.5 against 2.6 for SH, and the best models sat on the edges
+of the search box (y on its lower bound with one subevent, depth on the upper edge of the grid with
+two and three).
+
+**The false story.** That the penalties were rejecting subevents. `lcurve.txt` itself said so until
+2026-11-16: "penalized misfit rises ... expected when the stress/CLVD penalties reject extra
+subevents". Here the data misfit rose (2.03 to 2.32); the penalty factors stayed within 0.4%.
+
+**Root cause.** One record. The vertical component of IM.IL31 drifts, and in the band and window of
+the inversion its rms is 27 times the median of the 79 P displacement records (the next record: 3.6
+times). It carried 68% of the P misfit, so every model was fitted to a drift. Stage 1 had let it
+through: it screens the peak of the stored record with median ± 3 MAD and at least a factor 8, and
+this peak was 12 times the median, inside the 3 MAD of that group. The stage-2 screen compares each
+record with the 1-subevent prediction and would have removed it (amplitude more than 4 times off),
+but it was skipped as a whole, because the 1-subevent duration (4.1 s) was below 30% of the
+magnitude scaling and the result therefore "unrepresentative". The record made it so. The screen had
+been skipped for that reason in six of the nine events run with v3.
+
+**Fix.** `programs/prepare_SubMIT/screen_stations_model.py` has a third test, which needs no model:
+the rms of each observed trace as the inversion uses it (the `waveforms/*_obs_*` files of the forward
+run) against the median of its group (P displacement, P velocity, SH); a record more than 8 times
+above is excluded with its velocity twin. `calibrate_from_1sub.sh` skips only the two tests against
+the prediction when the 1-subevent result is unrepresentative. In the nine events the test removes
+this record and nothing else: the largest other ratio is 5.8. Rerun with the fix (16 ranks, two
+seeds): the record leaves with its velocity twin, and a second subevent no longer raises the misfit
+by 10-15%: it lowers it by 3.4% in one search and raises it by 2.3% in the other. Both searches
+select one subevent (Mw 7.34, 125 km deep). Three subevents fit 11% better, with a third subevent on
+the bounds of its search range; that is a separate incident of the same event (D5).
+
+**Permanent regression test.** `tests/test_regressions.py::test_a_record_far_above_its_group_in_the_inversion_band_is_excluded_without_a_model`.
+
+**Invalidated artifacts.** The cohort's Vanuatu runs and my two v3 runs of that event with the
+standard pipeline. The six v3 runs whose screen was skipped were checked with the new test: no
+station set changes.
+
+**Generalisable lesson.** **A safeguard that depends on the thing it guards fails when it is needed:
+the screen needed a usable 1-subevent model, and the bad record prevented one. Give every screen a
+version that needs only the data.**
+
 ---
 
 # B · Forward model
@@ -303,11 +353,16 @@ connection must run over the points that survived.**
 chain; the median chain's best was 16.6% worse, and a bootstrap over the chains selects N = 2 in 67%
 of resamples and N = 3 in 33%. The published runs: typically 2-6 of 32 chains within 2% of the best
 and split R-hat up to 11 (California E3 x). Colombia (user runs): 5, 4, 3, 2 and 4 subevents under
-small configuration changes.
+small configuration changes. A second cohort report (2026-11-16, v2 with 32 chains): the bundled
+Chile example, re-run from its frozen inputs, selected 3 subevents where the published run selected
+4 (its 4-subevent search ended at 0.948, above the 3-subevent 0.897 and the published 0.869);
+Colombia selected 1 and then 3; for Tonga (two runs) and Vanuatu (the first of two) the misfit rose
+with every added subevent.
 
 **The false story.** None documented. Because the Colombia runs changed a setting between runs,
 each change of the selected N could be read as a response to that setting rather than to the luck of
-the search.
+the search. (Colombia had a second cause, found later: its models sat on the bound of the centroid
+range, D4.)
 
 **Root cause.** Independent chains of 2000 x N iterations each settle in a local mode of a very
 peaked posterior (a model 1% worse has e^-2 of the density), so the best misfit of each N is the best
@@ -323,22 +378,24 @@ the prior; the population is resampled with weights exp(-dphi / (2 sigma^2 phi_r
 runs. The best misfit still differed between runs (1.840 and 1.844 for two seeds of the final
 sampler, 1.761, 1.840 and 1.847 for an earlier version), and after the last round the chains are
 copies of one island, so their agreement says nothing about that spread. finv therefore writes each island's best before the last round
-(`island_best_misfits.txt`), and `programs/prepare_SubMIT/plot_lcurve.py` bootstraps those
-independent replicates (the chains, for v2 runs), reports the share of resamples that select each
-N and warns below 80%. `programs/hist/posterior_summary.py` writes the chains within 1/2/5% of the
+(`island_best_misfits.txt`), and `programs/prepare_SubMIT/plot_lcurve.py` lists those bests for every
+N. Until 2026-11-16 it also bootstrapped them and warned when the winner took less than 80% of the
+resamples; that test was removed with the selection rule it tested (D3).
+`programs/hist/posterior_summary.py` writes the chains within 1/2/5% of the
 best and the split R-hat of every parameter (`convergence.txt`, RESULTS.md). The first version of
 the warm start had its own defect, which the Panama test log showed ("warm" on 8 of the 16 chains of
 the N = 1 run): without `warm_start.dat` the warm model has zero subevents, which equals N - 1 for
 N = 1, so half of the 1-subevent chains started at the epicentre instead of from the prior.
 
-**Permanent regression test.** `tests/test_regressions.py::test_lcurve_flags_a_selection_that_rests_on_one_chain`,
-`::test_lcurve_uses_islands_when_resampled_chains_agree`.
+**Permanent regression test.** None for the sampler: its test is a run, and the seed pairs of the
+README (Panama, Colombia, Vanuatu, and three of the bundled examples) are that evidence. The
+selection has the tests of D3.
 
 **Invalidated artifacts.** Selected N of runs without a convergence report.
 
 **Generalisable lesson.** **A model-selection rule applied to "the best of the chains" is only as
-reliable as the search: report how often the rule picks the same answer across independent
-searches, and make sure the searches you resample are still independent.**
+reliable as the search: run the search twice with different seeds before trusting the selected
+number, and make sure the searches you compare are independent.**
 
 ## D2 — The 1-subevent consolidation stored a misfit of another model
 
@@ -363,6 +420,172 @@ of a move is uniform; the population state copied between chains is the complete
 
 **Generalisable lesson.** A copy of "the state" must copy all of it, including what the bookkeeping
 structure was not built for.
+
+## D3 — The selection rule charged nothing per subevent
+
+**Symptom.** Two searches of the same data selected different numbers of subevents. Venezuela: 6
+(published v2 run), 5 (v3, 16 ranks) and 6 (v3, 32 ranks). California: 4 (v3, 16 ranks) and 5 (v3,
+32 ranks), where the 4-subevent misfit missed the 5% band by 0.05% (1.4992 against 1.4985). The
+replicate bootstrap that v3 had added against exactly this (D1) printed `WARNING: unstable
+selection` for all three 32-rank examples that had finished (winner at 22.5%, 68% and 71%). The
+first version of the fix (the lowest AIC, below) then gave 4, 4 and 5 for three California searches.
+
+**The false story.** That the search limited the selection, so that more chains would settle it. I
+wrote that remedy into the warning itself ("rerun those N with more MPI ranks"). The runs with more
+ranks were the ones that changed N: a deeper search lowers the misfit of the largest N first (the
+data misfits of two California searches were 5.4% apart at 5 subevents and 2.3% at 4), and the rule
+was anchored there.
+
+**Root cause.** The rule was the smallest N whose best misfit is within 5% of the lowest misfit of
+the grid, described in its own docstring as "scale-free and anchored to the global minimum". The
+anchor is the weakest number of the curve: the lowest misfit belongs to one of the largest N, whose
+searches converge last. And the rule charges nothing per subevent: a model with two more subevents
+has to fit 5% better in total, not 5% better for each. In the 32-rank Venezuela run, 5 subevents
+were rejected because 7 fit 6.5% better, which is 3.3% per added subevent. The bootstrap could not
+repair this. It resampled the island bests, which are snapshots at 75% of the burn-in and not
+finished searches, so it flagged every run, and it could vote against the selection made from the
+finished chains (Venezuela, 32 ranks, under the new rule: 6 subevents in 71% of the resamples, 5
+selected).
+
+**Fix.** `programs/prepare_SubMIT/plot_lcurve.py` computes the Akaike information criterion of
+every N, AIC = ln(misfit) / sigma^2 + 2 k N, with the sigma = 0.05 of the posterior that finv
+samples and k = 10 free parameters per subevent: a subevent costs 2 k sigma^2 = 5% of misfit
+(README section 4.6). The first version selected the N with the lowest AIC. On the runs above it
+selected 5 subevents for Venezuela three times and 4 for California twice, and a third California
+search (32 ranks, other chain seeds) then selected 5: its fifth subevent lowered the misfit by
+5.0%, where the earlier 32-rank search had found 4.8%, on the two sides of the 4.9% that a subevent
+costs. Both searches reported the tie of 4 and 5 (models within 2 AIC units), with the selection on
+opposite sides of it. The rule now selects the smallest N whose AIC is within 2 of the lowest: 4 in
+all three California searches. The models support that choice: the two 4-subevent models of the
+32-rank searches agree within 0.35 s and 9 km for every subevent, the two 5-subevent models place
+their fourth subevent 46 km apart. A fourth search, with the centroid range widened from 16 to
+22 s, kept the same four subevents, and its 5-subevent search ended 1.3% above them. `./submit` extends the grid while the lowest AIC, not the
+selection, sits at the largest N tried, so a tie at the edge of the grid cannot hide a larger N
+that is clearly better. Ties stay named (Venezuela, 32 ranks: 6 subevents 0.2 above 5). The
+bootstrap is gone; the island bests stay in `lcurve.txt` as information. One more thing was found
+on the way: the 5- and 6-subevent California searches had started from the prior on all 32 chains,
+because the 4-subevent model leaves no 2.5 s of room in time for another subevent, while their logs
+said "warm" for 16 of them. `finv.f90` now labels a chain by the start it got, and step 3 prints
+the count after each inversion.
+
+**Permanent regression test.** `tests/test_regressions.py::test_every_added_subevent_has_to_lower_the_misfit_by_five_percent`,
+`::test_three_searches_of_one_event_select_the_same_number_and_a_tie_is_named`,
+`::test_grid_extension_follows_the_lowest_aic_and_not_the_selection`,
+`::test_one_failed_search_in_the_middle_does_not_end_the_selection`,
+`::test_island_bests_are_listed_and_do_not_vote`,
+`::test_selection_and_sampler_use_the_same_posterior_width`.
+
+**Invalidated artifacts.** The 6 subevents of the published v2 Venezuela example (5 by the AIC on
+the same L-curve). Every `WARNING: unstable selection` and bootstrap share printed by v3 runs up to
+2026-11-16.
+
+**Generalisable lesson.** **A threshold measured from "the best of the grid" inherits the error of
+the hardest search. Charge complexity per parameter, at the noise level the inference already
+assumes. When two models tie, name the tie and take the simpler one: it is the model that
+independent searches agree on.**
+
+## D4 — The centroid range cut off a late main rupture
+
+**Symptom.** Colombia Mw 7.4, 116 km deep: 5, 4, 3, 2 and 4 subevents under small configuration
+changes (user runs, v2), then 1 and 3 in two cohort runs (v2). With v3 (16 ranks, two seeds) the
+chains of the 1-subevent run agreed with each other, on a model in the corner of the search box:
+centroid time 30.9-31.0 s of a range that ends at 31 s, y on its lower bound, depth on the upper
+edge of the grid. The misfit rose from 3.26 to 3.78 with a second subevent, and the best models of
+every N kept a subevent at 28-31 s.
+
+**The false story.** That the search was unlucky (D1). The v3 sampler removed the luck, and the two
+seeds then agreed to three digits on the same cut-off model.
+
+**Root cause.** The range of centroid times comes from the magnitude: a duration of
+5 x 10^((Mw - 6) / 2) = 25 s plus 6 s. The P energy of this earthquake builds up only about 30 s
+after the arrival predicted from the catalogue origin: the stack of its 58 P records stays below a
+fifth of its maximum until then (the Chile example, at the same depth, peaks 9 s after the predicted
+arrival). Its centroid therefore lies at the end of that range or beyond it. In August 2026 the
+range had been set to 55 s by hand for this event, and the misfits were 1.11 to 0.48 for 1 to 5
+subevents, where the default range gives 3.3 to 3.9. A model on a bound is not a minimum: what it leans on changes with N and with the
+configuration, and the selected N changed with it. The calibration had noticed that the 1-subevent
+result was odd (duration 3.8 s, logged as "stuck scan?") and went on.
+
+**Fix.** `programs/step3_do_inversions.sh`: when the first 1-subevent run ends in the last 1% of its
+centroid range, the range of every N is doubled, the P, SH and regional windows and the moment-rate
+window grow by the same number of seconds, and N = 1 runs again; after two doublings a warning names
+the origin time instead. Of the twelve v3 runs made before the fix only the two Colombia runs
+trigger it (the 1-subevent centroid of the others lies in the first 8-92% of its range). Rerun with
+the fix (16 ranks, two seeds): the range becomes 61 s, the 1-subevent centroid moves to 49.5 s and
+its misfit falls from 3.45 to 1.955. The two L-curves agree within 0.4% at every N (1.955, 1.236,
+1.190, 1.178, 1.186 and 1.955, 1.236, 1.191, 1.180, 1.190), and both select the same two subevents:
+a long one at the epicentre (24-27 s, centred at 28-31 s, Mw 7.34) and a short one 41 km to the
+south-west at 50 s (5 s, Mw 7.31-7.32); total Mw 7.45 against the catalogue's 7.4.
+
+**Permanent regression test.** `tests/test_regressions.py::test_centroid_range_is_doubled_when_the_first_one_subevent_run_ends_on_its_bound`,
+`::test_centroid_range_is_left_alone_when_the_centroid_lies_inside_it`,
+`::test_centroid_range_widening_gives_up_after_two_doublings`.
+
+**Invalidated artifacts.** Every Colombia result made with the default centroid range.
+
+**Generalisable lesson.** **A solution on the boundary of its search range is a statement about the
+range, not about the earthquake. Look at where the best model sits before reading its misfit, and
+widen what it leans on.**
+
+## D5 — A subevent in the corner of its search range won the selection
+
+**Symptom.** Vanuatu again, after the record screen of A6 (v3, 16 ranks, two sets of chain seeds):
+three subevents fit 11% better than one (1.534 against 1.724, and 1.520 against 1.714), and the
+lowest AIC selected three in both searches. The third subevent was the same in both: centroid time
+28.0 s in a range that ends at 28 s, 53 km east in a box that ends at 53 km, 76-77 km deep in a
+depth grid from 72 to 168 km, Mw 6.8, 11-16 s long.
+
+**The false story.** That two seeds which select the same number and the same subevents had
+confirmed the repair. I wrote it into this atlas (A6: "both seeds select the same three subevents")
+and into the README table. I had printed the centroid time of 28.0 s several times and never set it
+against the end of the range.
+
+**Root cause.** A best model on a bound is a constrained optimum, and nothing in the selection
+asked where the model sat. From two to three subevents (seeds 0) the P and SH misfits rose, from
+2.58 to 2.72 and from 2.49 to 2.72, and the misfit of the three regional stations fell from 0.54 to
+0.31: the third subevent fitted three stations from the latest time, the easternmost position and
+nearly the shallowest depth that the search allowed. The weights give the regional records a third
+of the misfit (P : SH : regional = 1.2 : 1 : 1), so three stations can pay for a subevent. D4
+tested this bound for the 1-subevent calibration run only, where the subevent sat at 9.3 s.
+
+**Fix.** `programs/prepare_SubMIT/plot_lcurve.py` tests the best model of every N. When its last
+subevent lies in the last 1% of the centroid range (the criterion of D4), the N is listed with
+`bound` in the place of its AIC, drawn as a hollow point, and cannot be selected; a note names those
+N and says what to widen if the rupture may have lasted longer. Vanuatu then selects one subevent in
+both searches. Its second subevent is a different matter: it raises the mean correlation of the P
+records from 0.38 to 0.56 and lowers the data misfit by 7.4%, pays 4.2% of CLVD penalty, and so
+lowers the penalized misfit by 3.4% in one search (it raises it by 2.3% in the other), below the
+4.9% that a subevent costs. The other bounds are not tested: depth, duration and position touch
+their limits in most good runs (the first three California subevents sit at the 3-km top of the
+depth grid), and only the end of the centroid range separated the failed runs from the others. When
+every N is on that bound (Colombia before D4: 30.8-31.0 s of 31 s) nothing is excluded, and the
+note says not to trust the selection. The 1% is measured: in the best models of all v3 runs, those
+pressed against the end of their range lie in its last 0.75%, and the nearest other one lies 2.07%
+before the end (California, 15.70 s of a range that ends at 16 s; with the range widened to 22 s
+that subevent stays at 15.8 s). My first threshold, 2%, sat on that model.
+
+**What the subevent is.** I then widened the range by hand to 55 s, with windows 27 s longer (16
+ranks, seeds 0). The third subevent leaves the time bound and settles at 31.5 s, 55 km north-east of
+the epicentre, at the top of the depth grid (73 km of a grid that starts at 72 km; the first two
+subevents lie at 135 and 139 km). The 4-subevent model has it at the same place, and three subevents
+fit 11% better than one (1.625 against 1.829). Its P wave reaches the teleseismic stations 36-37 s
+after that of the first subevent, between the pP phases of the first two subevents (31-35 s and
+39-43 s; iasp91, 45-90 deg). A late, shallow source at the time of the depth phases is what pP
+energy that the model does not predict looks like to this model. A real subevent 60 km above the
+hypocentre cannot be ruled out with these data, so the selection on the default range stays at one
+subevent, and the note in `lcurve.txt` leaves the widening to the user. For a deep event, the time
+of a late shallow subevent is worth comparing with the depth phases of the main ones.
+
+**Permanent regression test.** `tests/test_regressions.py::test_a_best_model_that_ends_on_the_bound_of_its_centroid_range_is_not_selected`,
+`::test_a_last_subevent_inside_its_centroid_range_keeps_its_place_in_the_selection`,
+`::test_when_every_best_model_ends_on_the_bound_nothing_is_excluded_and_the_selection_is_not_trusted`.
+
+**Invalidated artifacts.** The three Vanuatu subevents of the first version of A6 and of the README
+table (written 2026-11-17, never committed).
+
+**Generalisable lesson.** **Two searches that agree show that the search repeats, not that the
+model is free: a bound repeats perfectly. Before trusting a best model, ask where it sits in its
+search range.**
 
 ---
 
@@ -465,7 +688,7 @@ a test run (Aomori); the provenance of each fix is in its code comment.
 | F5 | regional 1/2 horizontals of unequal length written unrotated, the regional form of A1 | v2 | II.MSVF.00.BH2 (Tonga) shortened by 30 samples: SAC ERROR 2010 before the fix, rotated (cmpaz 0 and 90) after it, the other 13 records byte-identical | `MyExtractSeed_loc.sh`: cut to the common window, then check that every rotated north record has cmpaz 0 |
 | F6 | Green's-function key int(dist) against the saclst print that names the files in dotel.sh | v3 rewrite | 3 of 309 test distances mismatched (float32 6202.9995: key 6202, file 6203.grn.*), all matched after the fix | `prepare_stationinfo.py`, `test_green_function_key_follows_the_saclst_print_used_by_dotel` |
 | F7 | lost exit codes: the calibration returned 1 for a filler regional set (<= 2 stations) whenever the screen removed a station, which the new step-3 check turned into an abort; failed inversions were skipped and the L-curve built from the N that worked; two step-2 stages unchecked; mpirun forwarding the event list to rank 0 | v3 rewrite and v2 | filler case run on a copy of the Aomori folders with two regional stations: exit 0 after the fix | explicit statuses, step 3 stops on a failed N, `mpirun ... < /dev/null` |
-| F8 | with 8 or fewer ranks finv has one island, and plot_lcurve.py then bootstrapped the chains, which descend from that one population and always agree | v3 rewrite | | one island counts as one replicate, so the reproducibility is reported as not measured; `test_lcurve_does_not_trust_the_chains_of_a_single_island` |
+| F8 | with 8 or fewer ranks finv has one island, and plot_lcurve.py then bootstrapped the chains, which descend from that one population and always agree | v3 rewrite | | one island counted as one replicate, so the reproducibility was reported as not measured. The bootstrap was removed on 2026-11-17 (D3) |
 
 **Generalisable lesson.** **A review by someone who has not seen your reasoning finds the defects your
 reasoning hides: give the reviewer the code, ask for concrete failure scenarios, and check each one

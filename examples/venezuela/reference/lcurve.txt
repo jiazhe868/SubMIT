@@ -1,10 +1,19 @@
-n  best_misfit  source
-1  5.5472  hybrid-snapshot
-2  4.6327  hybrid-snapshot
-3  3.8535  hybrid-snapshot
-4  3.5992  hybrid-snapshot
-5  3.2028  hybrid-snapshot
-6  3.0719  hybrid-snapshot
-7  2.9938  hybrid-snapshot
-grid minimum 2.9938; 5% band <= 3.1435
-SUGGESTED number of subevents (elbow): 6
+n  best_misfit  reduction_%  delta_aic  chains  chains_within_1%  island_bests
+1       4.1238            -      198.4      32                22  4.1482,4.3095,4.7555,4.8563
+2       3.2735         20.6      126.0      32                32  3.2764,3.2805,3.3925,3.4261
+3       2.5324         22.6       43.3      32                 4  2.5556,2.6558,2.7738,2.7805
+4       2.3417          7.5       32.0      32                16  2.3364,2.3453,2.3478,2.3528
+5       2.0562         12.2        0.0      32                 5  2.0642,2.1526,2.1845,2.2381
+6       1.9567          4.8        0.2      32                 6  1.9585,2.0209,2.0215,2.0420
+misfit components of each best model: penalized = data_misfit x clvd_factor x stress_factor (evaluate_misfit_components.sh)
+n    penalized  data_misfit  clvd_factor  stress_factor  worst_axis_deg  p_misfit  sh_misfit  regional_misfit
+N=1     4.1238       3.9933       1.0327         1.0000             0.0     3.601      6.557            3.166
+N=2     3.2735       3.0977       1.0568         1.0000            24.6     4.147      2.845            1.995
+N=3     2.5324       2.3787       1.0646         1.0000            29.9     2.794      2.954            1.397
+N=4     2.3417       2.1791       1.0746         1.0000            29.9     2.313      2.937            1.373
+N=5     2.0562       1.9728       1.0423         1.0000            29.9     2.293      2.794            0.927
+N=6     1.9567       1.8905       1.0350         1.0000            30.0     2.034      2.890            1.019
+selection: AIC = ln(misfit) / sigma^2 + 2 k N, sigma = 0.05, k = 10 parameters per subevent, so a subevent costs 5% of misfit (ln(misfit) has to fall by 0.05, the misfit by 4.9%, to tie); delta_aic = AIC above the lowest; every N with delta_aic below 2 is tied, and the smallest of them is selected
+NOTE: a tie - N=5 (delta_aic 0.0), N=6 (delta_aic 0.2) are equally supported (delta_aic below 2); N=5 is selected as the smallest: report both
+lowest AIC: N=5
+SUGGESTED number of subevents (smallest N with delta_aic below 2): 5

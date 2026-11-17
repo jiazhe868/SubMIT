@@ -91,8 +91,11 @@ for txt, b in (("time bounds, windows, weights,\nscreening stage 2 (polarity, ga
 dcx, dcy, dw, dh = COLX[2] + W / 2, y - 5.2, 15.5, 5.2
 ax.add_patch(Polygon([(dcx, dcy + dh), (dcx + dw, dcy), (dcx, dcy - dh), (dcx - dw, dcy)],
                      closed=True, fc="white", ec=STAGES[2][1], lw=1.6, zorder=2))
-ax.text(dcx, dcy + 0.9, "smallest N within 5% of", ha="center", va="center", fontsize=9.5, color=INK, zorder=3)
-ax.text(dcx, dcy - 1.5, "the best fit, below max N?", ha="center", va="center", fontsize=9.5, color=INK, zorder=3)
+# the grid test of ./submit: one more N while the lowest Akaike criterion sits at the largest N tried
+# (a subevent costs 5% of misfit; the selection itself is the smallest N within 2 of that lowest AIC,
+# plot_lcurve.py); until 2026-11-16 this diamond read "smallest N within 5% of the best fit, below max N?"
+ax.text(dcx, dcy + 0.9, "N with the lowest AIC", ha="center", va="center", fontsize=9.5, color=INK, zorder=3)
+ax.text(dcx, dcy - 1.5, "below the largest N tried?", ha="center", va="center", fontsize=9.5, color=INK, zorder=3)
 # column 4 - results
 c4 = [box(3, TOP, "selected model", "Forward modeling"),
       box(3, TOP - (H + GAP), "subevents, uncertainties, waveform\nfits, station maps, RESULTS.md", "Figures & summary")]

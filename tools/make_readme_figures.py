@@ -127,30 +127,39 @@ def concept():
 
 # ------------------------------------------------------------------ model selection
 def model_selection():
-    fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    ax.axhspan(1.0, 1.05, color="#3b6fb6", alpha=0.15, lw=0)
-    ax.annotate("selection band: within 5% of the best fit", (1.0, 1.025), xytext=(0.78, 0.935),
-                fontsize=9.5, color="#3b6fb6", va="center", ha="left",
-                arrowprops=dict(arrowstyle="-", color="#3b6fb6", lw=0.8))
-    cols = ["#3b6fb6", "#e8853d", "#4d9a8a", "#b0457a", "#6a5acd"]
-    for (name, lab), col in zip(EVENTS, cols):
-        v = lcurve(name)
-        ns = np.array(sorted(v)); ms = np.array([v[k] for k in ns]) / min(v.values())
-        sel = int(open(os.path.join(EX, name, "selected_n")).read())
-        ax.plot(ns, ms, "-o", color=col, lw=2, ms=5, label=f"{lab.split('  ')[0]}  → {sel}")
-        ax.plot(sel, v[sel] / min(v.values()), "*", ms=17, color=col, mec="k", mew=0.8, zorder=5)
-    ax.set_yscale("log")
-    ax.set_yticks([1, 1.25, 1.5, 2, 3]); ax.set_yticklabels(["1", "1.25", "1.5", "2", "3"])
-    ax.set_xlabel("number of subevents")
-    ax.set_ylabel("misfit ÷ best misfit (lower = better fit)")
-    ax.set_title("Choosing the number of subevents: the smallest one inside the 5% band (★)",
-                 loc="left", fontsize=12)
-    ax.legend(frameon=False, fontsize=9.5, loc="upper right", title="example → selected n",
-              title_fontsize=9.5)
-    ax.set_xlim(0.7, 8.3); ax.set_ylim(0.9, None)
-    fig.tight_layout()
-    fig.savefig(os.path.join(OUT, "model_selection.png"), dpi=150)
-    plt.close(fig)
+    """One panel per example: best misfit against the number of subevents, the selection (star) and
+    the dashed line of a misfit 5% lower per added subevent, the cost of a subevent (README section
+    4.6). The curve touches the line at the star and stays above it elsewhere, except that a number
+    tied with the star can lie up to 0.5% below it. The 5% is 2 k sigma^2 of
+    programs/prepare_SubMIT/plot_lcurve.py; the selection is read from examples/NAME/selected_n,
+    which that script decided."""
+    log_misfit_drop_per_subevent = 0.05
+    line_colour = "#2a78d6"
+    figure, axes = plt.subplots(1, len(EVENTS), figsize=(2.6 * len(EVENTS), 2.9))
+    for axis, (example_name, example_label) in zip(axes, EVENTS):
+        best_misfit_of = lcurve(example_name)
+        subevent_counts = np.array(sorted(best_misfit_of))
+        best_misfits = np.array([best_misfit_of[count] for count in subevent_counts])
+        selected_count = int(open(os.path.join(EX, example_name, "selected_n")).read())
+        selected_misfit = best_misfit_of[selected_count]
+        line_counts = np.linspace(subevent_counts[0] - 0.3, subevent_counts[-1] + 0.3, 50)
+        line_misfits = selected_misfit * np.exp(-log_misfit_drop_per_subevent * (line_counts - selected_count))
+        axis.plot(line_counts, line_misfits, "--", color="0.55", lw=0.8, zorder=1)
+        axis.plot(subevent_counts, best_misfits, "-o", color=line_colour, lw=1.6, ms=4.5)
+        axis.plot(selected_count, selected_misfit, "*", ms=15, color=line_colour, mec="white", mew=0.8, zorder=5)
+        axis.set_xticks(subevent_counts)
+        axis.set_xlim(line_counts[0], line_counts[-1])
+        axis.set_ylim(min(best_misfits.min(), line_misfits.min()) * 0.95, best_misfits.max() * 1.04)
+        axis.tick_params(labelsize=9)
+        axis.grid(axis="y", ls="--", lw=0.4, color="0.85")
+        axis.set_axisbelow(True)
+        axis.set_xlabel("subevents", fontsize=10)
+        # the event name without magnitude and depth: the README text gives those
+        axis.text(0.97, 0.95, example_name.capitalize(), transform=axis.transAxes, ha="right", va="top", fontsize=10)
+    axes[0].set_ylabel("penalized misfit", fontsize=10)
+    figure.tight_layout()
+    figure.savefig(os.path.join(OUT, "model_selection.png"), dpi=300)
+    plt.close(figure)
 
 
 # ------------------------------------------------------------------ results overview

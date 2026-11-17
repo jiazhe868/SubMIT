@@ -12,8 +12,9 @@ What goes where (the layout ./submit example expects):
   event_list.dat  IRIS/event_list.dat of the run
   selected_n      the selection in IRIS/lcurve.txt
   frozen/<N>sub/  the final configuration of every inversion folder (after the 1-subevent
-                  calibration), its best model and its island bests, so figures mode can measure
-                  reproducibility at every N; samples.tar.gz (all chains) for the selected N only.
+                  calibration), its best model, its island bests and its misfit components, so
+                  figures mode can list the island bests and draw the factors of the misfit at every
+                  N; samples.tar.gz (all chains) for the selected N only.
                   Code and scripts are left out on purpose: figures and frozen modes copy frozen/
                   over a fresh copy of programs/code_SubMIT, and stale copies would override it.
   gf_inputs/      velocity models (vmodel_tel, vmodel_loc) and distance/depth grid (distdep.dat)
@@ -24,8 +25,8 @@ What goes where (the layout ./submit example expects):
   catalog/        not touched: the archived aftershock catalog and moment tensor the run replayed
 frozen/, reference/ and gf_inputs/ are replaced as a whole, so no file of an older run survives.
 
-History: written 2026-11-16 to rebuild the four examples from v3 runs at 32 MPI ranks
-(work/v3_session/scripts/rebuild_examples_32ranks.sh).
+History: written 2026-11-16 to rebuild the four examples from v3 runs at 32 MPI ranks; the examples
+bundled since 2026-11-17 were made with it.
 
 usage (from the repository root):
     python tools/make_example_from_run.py RUN_FOLDER examples/NAME
@@ -46,19 +47,22 @@ configuration_files = [
     "vel_stations.info", "weights.dat", "distdep.dat", "edges.dat", "seisdens.dat", "seisgrids.dat",
     "lola.dat", "lola_bg.dat", "mainshock.dat", "totalmt.dat", "totalmt_source.txt", "extended.flag",
     "extended_source.txt", "excluded_stations.txt", "Input.model", "best_model_hybrid.dat", "misfit.dat",
-    "island_best_misfits.txt",
+    "island_best_misfits.txt", "misfit_components.txt",
 ]
-# (Input.model and misfit.dat are written by step 4 for the selected N only)
+# (Input.model and misfit.dat are written by step 4 for the selected N only. misfit_components.txt is a
+# result, not configuration: it is kept so that figures mode, which ships the chains of the selected N
+# only, still draws the factors of every N next to the L-curve; frozen mode recomputes it.)
 required_configuration_files = ["Par.file", "search_par.file", "stations.info", "best_model_hybrid.dat"]
 # files that are deliberately not frozen: data, chains (samples.tar.gz instead), outputs, logs, figures,
 # and code or scripts that ./submit example copies fresh from programs/
 left_out_patterns = [
-    "data", "dataloc", "[0-9]*best.dat", "[0-9]*chain.dat", "allsamples.dat", "pooled_ensemble.dat", "mpi.out",
+    "data", "dataloc", "__pycache__", "[0-9]*best.dat", "[0-9]*chain.dat", "allsamples.dat", "pooled_ensemble.dat", "mpi.out",
     "*.o", "finv", "ffwd", "*.log", "*.pdf", "*.png", "*.c", "*.h", "*.f", "*.f90", "Makefile", "*.py",
     "convergence.txt", "warm_start.dat", "catalog.txt", "calibration_pass_model.txt",
 ]
 # reference figures: PDF -> first page as PNG, at the resolution that gives the v2 example sizes
-# (fits: letter page at 120 dpi = 1020 x 1320; histograms 100 dpi; L-curve 6 x 4.5 in at 110 dpi = 660 x 495)
+# (fits: letter page at 120 dpi = 1020 x 1320; histograms 100 dpi; L-curve 6 x 4.5 in at 110 dpi = 660 x 495,
+# or about 990 x 485 since it carries the misfit components, 9 x 4.4 in)
 figure_pages = {"fits_P": 120, "fits_SH": 120, "fits_rayl": 120, "histoplot_py": 100, "lcurve": 110}
 
 

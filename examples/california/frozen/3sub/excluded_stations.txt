@@ -1,23 +1,45 @@
-SNR P-disp data/II.ERM.00.z snr=4.2 < 5.5
-SNR P-disp data/CU.GRGR.00.z snr=4.8 < 5.5
 SNR P-disp data/II.KWJN.00.z snr=4.9 < 5.5
 SNR P-disp data/IU.TARA.00.z snr=4.2 < 5.5
-SNR SH data/G.DZM.00.t snr=5.3 < 5.5
-SNR SH data/PS.PATS..t snr=5.3 < 5.5
-SNR SH data/IU.LCO.00.t snr=4.9 < 5.5
-SNR SH data/CU.BCIP.00.t snr=3.0 < 5.5
+SNR P-disp data/II.ERM.00.z snr=4.2 < 5.5
+SNR P-disp data/CU.GRGR.00.z snr=4.8 < 5.5
 SNR SH data/IU.SAML.00.t snr=1.4 < 5.5
 SNR SH data/II.KWJN.00.t snr=4.5 < 5.5
-LOC dataloc/NC.KBU.01.n log10amp=-0.79 median=-1.79 (x9.92 of median)
-LOC dataloc/NC.KPPB.01.n log10amp=-0.86 median=-1.79 (x8.43 of median)
-LOC dataloc/NC.KSM.03.n log10amp=-0.79 median=-1.79 (x9.89 of median)
-pair    dataloc/NC.KPPB.01.e (component of excluded station)
-pair    dataloc/NC.KPPB.01.z (component of excluded station)
-pair    dataloc/NC.KSM.03.e (component of excluded station)
-pair    dataloc/NC.KSM.03.z (component of excluded station)
-pair    dataloc/NC.KBU.01.e (component of excluded station)
-pair    dataloc/NC.KBU.01.z (component of excluded station)
-pair    data/vel_II.ERM.00.z (companion of excluded data/II.ERM.00.z)
+SNR SH data/CU.BCIP.00.t snr=3.0 < 5.5
+SNR SH data/PS.PATS..t snr=5.3 < 5.5
+SNR SH data/G.DZM.00.t snr=4.9 < 5.5
+SNR SH data/IU.LCO.00.t snr=4.9 < 5.5
+SNR SH data/GE.DAG..t snr=5.3 < 5.5
+LOC dataloc/BK.GHOP.00.n log10amp=-0.61 median=-1.77 (x14.35 of median)
+LOC dataloc/BK.PETL.00.n log10amp=-0.51 median=-1.77 (x18.19 of median)
+LOC dataloc/BK.RBOW.00.n log10amp=-0.62 median=-1.77 (x14.01 of median)
+LOC dataloc/BK.WLKR.00.n log10amp=-0.44 median=-1.77 (x21.32 of median)
+LOC dataloc/CE.89101.10.n log10amp=-0.55 median=-1.77 (x16.36 of median)
+LOC dataloc/CE.89688.10.n log10amp=-2.89 median=-1.77 (x0.08 of median)
+LOC dataloc/NC.KCO..e log10amp=-0.69 median=-1.77 (x11.97 of median)
+LOC dataloc/NC.KCO..n log10amp=-0.29 median=-1.77 (x30.07 of median)
+LOC dataloc/NC.KCT..e log10amp=-0.32 median=-1.77 (x27.99 of median)
+LOC dataloc/NC.KCT..n log10amp=-0.62 median=-1.77 (x14.13 of median)
+LOC dataloc/NC.KMPB..n log10amp=-0.63 median=-1.77 (x13.67 of median)
+LOC dataloc/NC.KPR.01.n log10amp=-0.68 median=-1.77 (x12.19 of median)
+pair    dataloc/CE.89688.10.e (component of excluded station)
+pair    dataloc/CE.89688.10.z (component of excluded station)
+pair    dataloc/CE.89101.10.e (component of excluded station)
+pair    dataloc/CE.89101.10.z (component of excluded station)
+pair    dataloc/BK.PETL.00.e (component of excluded station)
+pair    dataloc/BK.PETL.00.z (component of excluded station)
+pair    dataloc/NC.KMPB..e (component of excluded station)
+pair    dataloc/NC.KMPB..z (component of excluded station)
+pair    dataloc/BK.RBOW.00.e (component of excluded station)
+pair    dataloc/BK.RBOW.00.z (component of excluded station)
+pair    dataloc/NC.KCT..z (component of excluded station)
+pair    dataloc/BK.GHOP.00.e (component of excluded station)
+pair    dataloc/BK.GHOP.00.z (component of excluded station)
+pair    dataloc/NC.KCO..z (component of excluded station)
+pair    dataloc/NC.KPR.01.e (component of excluded station)
+pair    dataloc/NC.KPR.01.z (component of excluded station)
+pair    dataloc/BK.WLKR.00.e (component of excluded station)
+pair    dataloc/BK.WLKR.00.z (component of excluded station)
 pair    data/vel_CU.GRGR.00.z (companion of excluded data/CU.GRGR.00.z)
 pair    data/vel_IU.TARA.00.z (companion of excluded data/IU.TARA.00.z)
 pair    data/vel_II.KWJN.00.z (companion of excluded data/II.KWJN.00.z)
+pair    data/vel_II.ERM.00.z (companion of excluded data/II.ERM.00.z)

@@ -15,7 +15,7 @@
 ! E1 depth 2.1, California 3sub E3 x 11.0). The best misfit per N, and with it the selected number
 ! of subevents, then depended on luck: the 2026 Colombia runs selected 5, 4, 3, 2, 4 subevents under
 ! small configuration changes, and in the 2026 Panama test N = 2 rested on one chain of 16.
-! The sampler now has four parts:
+! The sampler now has five parts:
 ! - the burn-in is split into anneal_stages stages; between stages every chain copies the state of a
 !   chain drawn with weight exp(-dphi / (2 sigma^2 phi_ref)), its posterior density, among the chains
 !   of its island of 8; the last round draws from all chains. Chains in poor modes are replaced by
@@ -23,9 +23,13 @@
 ! - 5% of the proposals move one subevent to a position drawn from the prior (relocation), so a
 !   chain can jump between modes tens of km apart that local moves cannot connect;
 ! - half of the chains start from the best N-1 model plus one subevent from the prior (warm start,
-!   warm_start.dat), so the search for N begins at the misfit already reached with N-1;
+!   warm_start.dat), so the search for N begins at the misfit already reached with N-1. The new
+!   subevent needs a free slot in time (2.5 s from its neighbours): the 4-subevent model of the
+!   32-rank California run (centroid times 5.2, 8.5, 12.8 and 15.4 s in a range that ends at 16 s)
+!   had none, and every chain of its 5- and 6-subevent runs started from the prior; the log line
+!   of each chain says which start it got;
 ! - island_best_misfits.txt records each island's best before the last round: the islands are
-!   independent replicate searches until then, and plot_lcurve.py bootstraps them;
+!   independent searches until then, and plot_lcurve.py lists their bests next to the L-curve;
 ! - a random-walk proposal that breaks a hard rule is a rejection (PITFALLS F1).
 ! Measured on the California 3-subevent configuration (16 ranks, 9000 + 3000 iterations, seeds 0
 ! and 500): independent chains (3000-iteration burn-in) left 1 of 16 chains within 2% of the best
@@ -65,7 +69,9 @@ program finv
     integer, parameter :: display_interval = 250
     integer, parameter :: adaptive_start = 500                   ! states before the adaptive moves begin
     integer, parameter :: island_size = 8                        ! chains per island of the population resampling
-    real, parameter :: sigma_relative = 0.05                     ! posterior width (README 4.5)
+    ! posterior width (README 4.5); plot_lcurve.py uses the same value in the Akaike criterion that
+    ! selects the number of subevents, and tests/test_regressions.py checks that the two are equal
+    real, parameter :: sigma_relative = 0.05
     real, parameter :: t_gap_nominal = 2.5                       ! minimum gap of centroid times (s)
     real, parameter :: degrees_per_radian = 57.29578
 
@@ -104,7 +110,7 @@ program finv
     ! --- warm start: the best model of the run with one subevent fewer (warm_start.dat, written by step 3)
     integer :: warm_subevent_count
     real :: warm_para(max_subevents, 7)
-    logical :: is_warm_chain, warm_draw_ok
+    logical :: is_warm_chain, warm_draw_ok, started_warm
     real, allocatable :: samples(:, :, :)
     real :: sample_swap(max_subevents, 8)
     logical :: is_feasible, accepted
@@ -258,6 +264,7 @@ program finv
     ! (warm_subevent_count >= 1: without warm_start.dat the count is 0, which equals neq - 1 for one
     ! subevent and once made the odd chains of every N = 1 run start at the epicentre)
     is_warm_chain = warm_subevent_count >= 1 .and. warm_subevent_count == neq - 1 .and. mod(rank, 2) == 1
+    started_warm = .false.
     do j = 1, 101
         warm_draw_ok = .false.
         if (is_warm_chain) call draw_warm_start_model(para_proposed, warm_draw_ok)
@@ -267,12 +274,15 @@ program finv
         if (initial_draw_like < like) then
             like = initial_draw_like
             para = para_proposed
+            started_warm = warm_draw_ok
         end if
     end do
     if (like >= 9999.0) write(*, *) 'WARNING rank', rank + seed_offset, ': no initial draw had a finite misfit'
     like_best = like
     para_best = para
-    write(*, *) 'Rank ', rank + seed_offset, 'Like_init', like, merge(' warm', ' cold', is_warm_chain)
+    ! "warm" only when the start is a warm draw: a warm chain whose N-1 model leaves no room for
+    ! another subevent starts from the prior like the others, and was once labelled warm all the same
+    write(*, *) 'Rank ', rank + seed_offset, 'Like_init', like, merge(' warm', ' cold', started_warm)
     call MPI_ALLREDUCE(like, like_reference, 1, MPI_REAL, MPI_MIN, MPI_COMM_WORLD, mpi_status_code)
 
     ! ---------------------------------------------------------------------------------------------
@@ -787,10 +797,10 @@ contains
 
     ! island_best_misfits.txt (one line per island: island, chains, best misfit so far), written just before
     ! the global round. Until that round the islands are independent populations, so their bests are
-    ! replicate inversions with island_size chains each; after it every chain descends from the best
+    ! independent searches with island_size chains each; after it every chain descends from the best
     ! island and the chains no longer measure how reproducible the search is (their bests then agree
     ! within 1-2% even when two seeds of the same run differ by 5%: California 3sub, seeds 0 and 500,
-    ! best 1.761 and 1.847). plot_lcurve.py bootstraps these bests to test the selected N.
+    ! best 1.761 and 1.847). plot_lcurve.py lists these bests next to the L-curve.
     ! Collective: called by every rank inside resample_population.
     subroutine write_island_bests()
         integer, parameter :: island_unit = 23

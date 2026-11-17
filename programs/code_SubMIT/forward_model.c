@@ -1012,7 +1012,10 @@ void sub_forward_(int *subevent_count_pointer, float *model, float *penalized_mi
         if (setup.outputs_enabled) {
             /* the weight-balancing step greps this line: shares of the residual sum per wave type */
             printf("bandresid: %e %e %e bandnorm: %e %e %e\n", residual_sum[0], residual_sum[1], residual_sum[2], norm_sum[0], norm_sum[1], norm_sum[2]);
-            printf("%f %f %f %f %f %f\n", data_misfit, exp(weighted_clvd / setup.dc_constraint), exp(stress_penalty), *penalized_misfit, worst_p, worst_t);
+            /* evaluate_misfit_components.sh greps this line: the three factors of the penalized misfit
+               (data misfit, CLVD factor, stress factor), their product, and the worst P- and T-axis
+               rotations in degrees (unlabeled until 2026-11-16) */
+            printf("misfit_components: %f %f %f %f %f %f\n", data_misfit, exp(weighted_clvd / setup.dc_constraint), exp(stress_penalty), *penalized_misfit, worst_p, worst_t);
             fflush(stdout);
             if (!getenv("FFWD_COMPACT")) {
                 const char *wave_header[3] = {"# P waves", "# SH waves", "# Rayleigh waves"};

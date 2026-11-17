@@ -6,13 +6,23 @@
 # the N >= 2 runs, balances the wave-type weights and screens stations against the 1-subevent
 # prediction; N = 1 is then run again under that same configuration, so every point of the L-curve
 # is scored on identical data (otherwise N = 1 is scored on longer windows and other weights and the
-# 5% rule compares incomparable misfits). The first N = 1 result is kept as calibration_pass_model.txt
-# (a name that the *best.dat globs below cannot match: as calibration_pass_best.dat it was deleted by
-# the rerun's clean-up).
+# selection of plot_lcurve.py compares incomparable misfits). The first N = 1 result is kept as
+# calibration_pass_model.txt (a name that the *best.dat globs below cannot match: as
+# calibration_pass_best.dat it was deleted by the rerun's clean-up).
 # With arguments: only those N, without calibration (grid extensions, reruns after editing).
 #
+# After each inversion, prepare_SubMIT/evaluate_misfit_components.sh splits the best misfit of every
+# chain into the data misfit and the two penalty factors (misfit_components.txt, drawn by
+# plot_lcurve.py next to the L-curve; about 20 s per folder).
+#
+# Centroid range: the range of centroid times of every N comes from the magnitude (duration + 6 s,
+# get_search_par.py). When the first 1-subevent run ends on its upper bound, the moment release
+# lies later than that: the range of every N is doubled, the windows are lengthened by the same
+# amount, and N = 1 runs again, at most twice (widen_centroid_range_while_on_bound below).
+#
 # Warm start: before N >= 2 runs, the best model of N-1 is copied to warm_start.dat; half of the
-# chains start from it plus one subevent drawn from the prior (finv.f90).
+# chains start from it plus one subevent drawn from the prior (finv.f90), and the line after
+# "inversion done" says how many did.
 #
 # History: this replaces step3_do_inversions.sh + step3_do_inversions_tempnsub.sh, which ran each
 # folder through awk system() (killing the driver orphaned the awk, which kept starting mpirun jobs).
@@ -60,7 +70,7 @@ run_inversion() {
     local inversion_dir=$1
     ( cd "$inversion_dir" && make clean > /dev/null 2>&1 && make finv > make.log 2>&1 ) \
         || { echo "COMPILE FAILED in $inversion_dir (see $inversion_dir/make.log)"; return 1; }
-    ( cd "$inversion_dir" && rm -f ./*best.dat best_model_*.dat ./*chain.dat mpi.out island_best_misfits.txt \
+    ( cd "$inversion_dir" && rm -f ./*best.dat best_model_*.dat ./*chain.dat mpi.out island_best_misfits.txt misfit_components* \
         && mpirun -np "$submit_rank_count" ./finv > mpi.out 2>&1 < /dev/null ) \
         || { echo "INVERSION FAILED in $inversion_dir (mpirun exit status; see $inversion_dir/mpi.out)"; return 1; }
     if ! ls "$inversion_dir"/[0-9]*best.dat > /dev/null 2>&1; then
@@ -69,6 +79,60 @@ run_inversion() {
     fi
     sort -gk3 "$inversion_dir"/[0-9]*best.dat | head -1 > "$inversion_dir/best_model_hybrid.dat"
     echo "inversion done: $inversion_dir best misfit $(gawk '{print $3}' "$inversion_dir/best_model_hybrid.dat")"
+    # none when the N-1 model leaves no room in time for another subevent (finv.f90): the search for
+    # this N then started from the prior, and its misfit is less likely to improve on N-1
+    if [ -s "$inversion_dir/warm_start.dat" ]; then
+        echo "    $(grep -ac 'Like_init.* warm' "$inversion_dir/mpi.out") of $submit_rank_count chains started from the best model with one subevent fewer"
+    fi
+    # a diagnostic: it warns on failure but never stops step 3
+    bash ../programs/prepare_SubMIT/evaluate_misfit_components.sh "$inversion_dir" \
+        || echo "WARNING: misfit components failed for $inversion_dir"
+    return 0
+}
+
+# A best 1-subevent model whose centroid time sits on the upper bound of its range was cut off by
+# that bound. 2026 Colombia Mw 7.4, 116 km deep (v3, two seeds): every chain ended at 30.9-31.0 s of
+# a range that ends at 31 s, at the corner of the search box (y on its lower bound, depth on its
+# upper edge), because the P energy of this earthquake only builds up about 30 s after the predicted
+# arrival (the stack of its 58 P records stays below a fifth of its maximum until then); the best
+# models of every N then kept a subevent at 28-31 s and the misfit rose from 1 to 2 subevents. In
+# the other ten v3 runs the 1-subevent centroid lies in the first 8-92% of its range. "On the
+# bound" is the last 1% of the range, as in plot_lcurve.py, which applies the same test to the best
+# model of every N. The range is doubled, because the magnitude gave no better
+# scale, and the P, SH and regional windows and the moment-rate window grow by the same number of
+# seconds (the records are far longer than the windows; the body-wave windows stop at 300 s as in
+# calibrate_from_1sub.sh, which then shortens range and windows again from the new 1-subevent result).
+widen_centroid_range_while_on_bound() {
+    local inversion_dir=$1 event=$2 attempt centroid upper lower added folder
+    for attempt in 1 2 3; do
+        centroid=$(gawk '{print $4}' "$inversion_dir/best_model_hybrid.dat")
+        upper=$(gawk '$1=="cen_max"{print $2}' "$inversion_dir/search_par.file")
+        lower=$(gawk '$1=="cen_min"{print $2}' "$inversion_dir/search_par.file")
+        if [ "$(gawk -v c="$centroid" -v u="$upper" -v l="$lower" 'BEGIN{print (u - c < 0.01 * (u - l)) ? 1 : 0}')" -ne 1 ]; then
+            return 0
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            echo "WARNING: the 1-subevent centroid ($centroid s) is still on the upper bound of its range ($upper s) after two doublings: check the origin time of the event, or set cen_max in the search_par.file of every inv_${event}_*sub folder by hand"
+            return 0
+        fi
+        added=$(gawk -v u="$upper" -v l="$lower" 'BEGIN{printf "%d", u - l + 0.999}')
+        echo "centroid range: the 1-subevent centroid ($centroid s) is on the upper bound of its range ($upper s); range and windows of every N lengthened by $added s, and N = 1 runs again"
+        for folder in inv_"${event}"_*sub; do
+            [ -s "$folder/search_par.file" ] && [ -s "$folder/Par.file" ] || continue
+            gawk -v a="$added" '$1=="cen_max"{$2 = $2 + a} {print}' "$folder/search_par.file" > "$folder/search_par.file.tmp" \
+                && mv "$folder/search_par.file.tmp" "$folder/search_par.file" || return 1
+            # the regional window keeps the cap of gen_par.py (500 samples from its start)
+            gawk -v a="$added" '
+                NR == FNR { if ($1 == "bg_timeRayl=") regional_begin = $2; if ($1 == "deltat=") interval = $2; next }
+                /^(nd_timeP|nd_timeSH|nd_timeRayl|stf_etime)=/ {
+                    key = $1; value = $2 + a
+                    if ((key == "nd_timeP=" || key == "nd_timeSH=") && value > 300) value = 300
+                    if (key == "nd_timeRayl=" && value > regional_begin + int(499 * interval)) value = regional_begin + int(499 * interval)
+                    comment = $0; sub(/^[^#]*/, "", comment); print key " " value " " comment; next }
+                { print }' "$folder/Par.file" "$folder/Par.file" > "$folder/Par.file.tmp" && mv "$folder/Par.file.tmp" "$folder/Par.file" || return 1
+        done
+        run_inversion "$inversion_dir" || return 1
+    done
 }
 
 while read -r event_name rest; do
@@ -89,6 +153,8 @@ while read -r event_name rest; do
         # a failed N stops step 3: the L-curve would otherwise select among the N that happened to work
         run_inversion "$inversion_dir" || { echo "step3 ABORTED at $inversion_dir"; exit 1; }
         if [ -z "$requested_counts" ] && [ "$subevent_count" -eq 1 ] && [ -f "inv_${event_name}_2sub/Par.file" ]; then
+            widen_centroid_range_while_on_bound "$inversion_dir" "$event_name" \
+                || { echo "step3 ABORTED: widening the centroid range failed for $event_name"; exit 1; }
             bash ../programs/prepare_SubMIT/calibrate_from_1sub.sh "$inversion_dir" "$event_name" \
                 || { echo "step3 ABORTED: the 1-subevent calibration failed (messages above)"; exit 1; }
             cp "$inversion_dir/best_model_hybrid.dat" "$inversion_dir/calibration_pass_model.txt"
