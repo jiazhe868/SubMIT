@@ -18,3 +18,6 @@ programs/select/snr
 programs/code_SubMIT/finv
 programs/fwd_SubMIT/ffwd
 __pycache__/
+# macOS metadata written when files are copied from a Mac (seven ._crust1.* files were tracked until v3)
+._*
+.DS_Store

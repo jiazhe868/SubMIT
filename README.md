@@ -1089,7 +1089,6 @@ SubMIT was developed by Zhe Jia. If you use it, please cite the method papers (J
   included); the bundled copy omits the documentation and the optional Jython console.
 * **CRUST1.0** — Laske, G., Masters, G., Ma, Z., & Pasyanos, M. (2013). Update on CRUST1.0 — A
   1-degree global model of Earth's crust. *Geophysical Research Abstracts*, 15, EGU2013-2658.
-* **r8lib** — John Burkardt (LGPL), linear algebra.
 * SAC is required but **not** included; obtain it from IRIS/EarthScope.
 
 ### Data

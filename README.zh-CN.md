@@ -735,7 +735,6 @@ SubMIT 由 Zhe Jia 开发。如果你使用它，请引用方法论文（Jia 等
 * **fk**——Lupei Zhu（圣路易斯大学），频率-波数法合成地震图：Zhu, L., & Rivera, L. A. (2002). A note on the dynamic and static displacements from a point source in multilayered media. *Geophysical Journal International*, 148(3), 619–627. <https://doi.org/10.1046/j.1365-246X.2002.01610.x>。版权声明见 `programs/fk3.2/README`（附带该声明即可再分发；作者希望在再分发时得到告知）。
 * **TauP 2.0**——Crotwell, H. P., Owens, T. J., & Ritsema, J. (1999). The TauP Toolkit: Flexible seismic travel-time and ray-path utilities. *Seismological Research Letters*, 70(2), 154–160. <https://doi.org/10.1785/gssrl.70.2.154>。GPL-3.0（`programs/TauP-2.0/gpl-3.0.txt`，含源代码）；随附的副本省略了文档和可选的 Jython 控制台。
 * **CRUST1.0**——Laske, G., Masters, G., Ma, Z., & Pasyanos, M. (2013). Update on CRUST1.0 — A 1-degree global model of Earth's crust. *Geophysical Research Abstracts*, 15, EGU2013-2658.
-* **r8lib**——John Burkardt（LGPL），线性代数。
 * SAC 是必需的，但**不**包含在本仓库中；请从 IRIS/EarthScope 获取。
 
 ### 数据

@@ -1,0 +1,11 @@
+# GitHub's language bar (Linguist) counts bytes per file extension. Bundled third-party code and data
+# are marked as vendored so that the bar shows SubMIT's own code. Before this file the bar read
+# "GLSL 67.7%, Java 17.4%": the CRUST1.0 table crust1.vs (3.6 MB) has the extension of a GLSL vertex
+# shader, and TauP ships its Java sources. (gitattributes allows comments only on their own lines.)
+
+# CRUST1.0 crustal model (Laske et al., 2013)
+programs/crust1.0/** linguist-vendored
+# TauP travel-time toolkit (Crotwell et al., 1999), GPL-3.0, Java
+programs/TauP-2.0/** linguist-vendored
+# fk frequency-wavenumber synthetics (Zhu & Rivera, 2002)
+programs/fk3.2/** linguist-vendored
