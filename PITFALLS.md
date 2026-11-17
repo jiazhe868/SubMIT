@@ -9,15 +9,16 @@ the 2026 Mw 7.4 Colombia earthquake, by clean-environment runs (fresh clone, fre
 environment) on three earthquakes the code had never seen (2026-10-09 Panama Mw 7.7, 2026-03-24
 Tonga Mw 7.5 at 234 km depth, 2025-12-08 Aomori Mw 7.6), by an independent code review (F), by
 running the four examples with v3 at 16 and at 32 MPI ranks, the latter with two sets of chain seeds
-(D3), by a second cohort report of 2026-11-16 on v2 reruns of four events (A6, D4), and by checking
-the repaired runs of that report (D5). Nothing below is a generic best-practice list. Where nobody
-is known to have believed a wrong explanation, "The false story" says so and names what made the
-defect easy to miss.
+(D3), by a second cohort report of 2026-11-16 on v2 reruns of four events (A6, D4), by checking the
+repaired runs of that report (D5), and by running an example in a fresh clone of the commit before
+it was pushed (E4). Nothing below is a generic best-practice list. Where nobody is known to have
+believed a wrong explanation, "The false story" says so and names what made the defect easy to
+miss.
 
-**The organising observation: only two of the eighteen incidents stopped the pipeline (E1, E2). In
-fourteen, the pipeline ran to the end and drew plausible figures, and one of those (A1) was explained
-away twice instead of being found: its unrotated SH records were removed as "polarity flips" and
-"gain errors", and the poor SH fit they caused was read as a smooth background rupture.**
+**The organising observation: only three of the nineteen incidents stopped the pipeline (E1, E2,
+E4). In fourteen, the pipeline ran to the end and drew plausible figures, and one of those (A1) was
+explained away twice instead of being found: its unrotated SH records were removed as "polarity
+flips" and "gain errors", and the poor SH fit they caused was read as a smooth background rupture.**
 
 Companion document: [README.md](README.md) explains the method and the pipeline.
 
@@ -45,6 +46,7 @@ Companion document: [README.md](README.md) explains the method and the pipeline.
 | E1 | fresh clone has no greenFuncDir_disp; the clean-up then deletes every Green's function | systems | run aborts after the longest stage |
 | E2 | fixed array limits | systems | step 3 aborted for 108 and 232 teleseismic stations |
 | E3 | silent crashes hidden by unchecked exit codes | systems | Qt backend abort in caldens.py, orphaned MPI jobs, clobbered arguments |
+| E4 | an example started before the build used another fk from the PATH | systems | regional Green's functions computed with a program that is not the bundled one; the run stops only in step 4 |
 | F1-F8 | defects found by an independent review of the v3 code, each checked before it was fixed | review | see section F |
 
 Each incident uses the same template: **Symptom → The false story → Root cause → Fix →
@@ -667,6 +669,39 @@ steps 3 and 4 run under `set -u`, and `compiler_environment.sh` read the unset `
 
 **Generalisable lesson.** **A pipeline that does not check exit codes reports the last stage that
 printed something, not the last stage that worked.**
+
+## E4 — An example started before the build used another fk from the PATH
+
+**Symptom.** In a fresh clone of the commit that was about to be pushed, I started `./submit example
+california` without `./submit build`. The Green's-function stage ended after three minutes without a
+message, the L-curve was drawn from the bundled models, and step 4 stopped: `step4: forward run or
+figures failed`, with `missing Green's function file: .../vmodel_3/6505.grn.ddpz` in `ffwd.log`.
+
+**The false story.** Until I read the logs, mine: that the commit lacked a file which the working
+tree had. The earlier example checks ran on copies of the working tree, and those also hold the
+built programs, which git ignores.
+
+**Root cause.** Three things together. `./submit example` and `./submit run` did not check that the
+bundled codes were built; the build is a separate line of the quick start. `fk.pl` calls `fk` and
+`sachd` by name, and `./submit` only puts `programs/fk3.2` first on the `PATH`: with nothing built
+there, the shell found another fk installation of the test machine (a different binary), and the
+28,215 regional Green's-function files were computed with it. `mtel3` is called by its path, so no
+teleseismic Green's function was written, and `dotel.sh` still ended with status 0. The check after
+the stage asked only whether any `*.grn.*` file existed, and the regional files satisfied it.
+
+**Fix.** `./submit example` and `./submit run` stop at once when one of the four bundled programs
+(`fk`, `sachd`, `mtel3`, `rayinformation`) is not built: `programs/fk3.2/fk is not built - run
+./submit build first`. `./submit check` reads the same list of programs.
+
+**Permanent regression test.**
+`tests/test_regressions.py::test_submit_refuses_to_start_before_the_bundled_codes_are_built`, and
+the quick-start sequence (check, build, example, compare) in a fresh clone before a push.
+
+**Invalidated artifacts.** None. Every code tree that made a bundled run or a check held the four
+built programs.
+
+**Generalisable lesson.** **A program called by name is whichever one the machine finds first. A
+pipeline that ships its own has to check that its own is the one that runs.**
 
 ---
 

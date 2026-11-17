@@ -285,6 +285,22 @@ def test_submit_refuses_more_subevents_than_the_limit():
     assert "outside 1..7" in result.stderr, result.stderr
 
 
+def test_submit_refuses_to_start_before_the_bundled_codes_are_built():
+    # PITFALLS E4: an example started in a fresh clone without ./submit build computed the regional
+    # Green's functions with another fk found on the PATH and failed in step 4. The copy of the driver
+    # below sees an examples folder and an empty programs folder, as a clone does before the build.
+    with tempfile.TemporaryDirectory() as folder:
+        shutil.copy(os.path.join(repository_root, "submit"), folder)
+        os.makedirs(os.path.join(folder, "examples", "california"))
+        os.makedirs(os.path.join(folder, "programs"))
+        os.makedirs(os.path.join(folder, "own_event", "IRIS"))
+        for arguments in (["example", "california"], ["run", os.path.join(folder, "own_event")]):
+            result = subprocess.run(["bash", os.path.join(folder, "submit")] + arguments, capture_output=True, text=True)
+            assert result.returncode != 0, result
+            assert "is not built - run ./submit build first" in result.stderr, result.stderr
+            assert not os.path.exists(os.path.join(folder, "work")), "the example was set up before the check"
+
+
 # ---------------------------------------------------------------------------
 # misfit components next to the L-curve (README section 4.6)
 # ---------------------------------------------------------------------------

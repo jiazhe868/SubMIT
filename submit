@@ -15,13 +15,13 @@
 #
 # Example modes (--mode):
 #   figures  (default) rebuild Green's functions, then regenerate every figure
-#            from the published best models          ~0.5-1.5 h
+#            from the published best models          6-13 min on 32 cores
 #   frozen   re-run the MCMC inversions with the exact published configuration
 #            files, then select the number of subevents and make figures
-#                                                    ~1-14 h on 32 cores
+#                                                    1.5-4 h on 32 cores
 #   full     run the whole automated pipeline from the processed waveforms
 #            (screening, weighting, priors, inversions, selection, figures)
-#                                                    ~1.5-16 h on 32 cores
+#                                                    1.5-4 h on 32 cores
 # Other options:
 #   --quick         very short Markov chains (smoke test of the machinery only;
 #                   the numbers are NOT meaningful)
@@ -67,6 +67,19 @@ setup_env() {
     return 0
 }
 
+# The Green's-function codes that ./submit build compiles; examples and runs need all of them.
+# An example started in a fresh clone without the build (2026-11-17) found another fk on the PATH of
+# the test machine and computed the regional Green's functions with it, got no teleseismic ones
+# (mtel3 is called by its path), and failed three minutes later in step 4 with "missing Green's
+# function file" (PITFALLS E4).
+bundled_code_programs="fk3.2/fk fk3.2/sachd mtel3/mtel3 mtel3/rayinformation"
+require_bundled_codes() {
+    local program
+    for program in $bundled_code_programs; do
+        [ -x "$PROG/$program" ] || die "programs/$program is not built - run ./submit build first"
+    done
+}
+
 # ---------------------------------------------------------------- check
 cmd_check() {
     setup_env
@@ -100,7 +113,7 @@ cmd_check() {
         "$SUBMIT_PYTHON" -c "import $m" 2>/dev/null && ok "$m" || miss "python package $m"
     done
     say "bundled codes"
-    for b in fk3.2/fk fk3.2/sachd mtel3/mtel3 mtel3/rayinformation; do
+    for b in $bundled_code_programs; do
         [ -x "$PROG/$b" ] && ok "$b" || miss "$b (run ./submit build)"
     done
     echo "h
@@ -261,6 +274,7 @@ cmd_run() {
     done
     check_subevent_limit "$nmax"
     setup_env
+    require_bundled_codes
     ln -sfn "$PROG" "$D/programs"
     cd "$D/IRIS"
     exec > >(tee -a "$D/submit.log") 2>&1
@@ -291,6 +305,7 @@ cmd_example() {
     local subevent_limit=${nmax:-$max_subevent_count}
     check_subevent_limit "$subevent_limit"
     setup_env
+    require_bundled_codes
     local fz="$EX/$name/frozen" ev nsel W
     ev=$(awk '{print $1}' "$EX/$name/event_list.dat")
     nsel=$(cat "$EX/$name/selected_n")
