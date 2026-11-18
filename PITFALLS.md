@@ -10,13 +10,14 @@ environment) on three earthquakes the code had never seen (2026-10-09 Panama Mw 
 Tonga Mw 7.5 at 234 km depth, 2025-12-08 Aomori Mw 7.6), by an independent code review (F), by
 running the four examples with v3 at 16 and at 32 MPI ranks, the latter with two sets of chain seeds
 (D3), by a second cohort report of 2026-11-16 on v2 reruns of four events (A6, D4), by checking the
-repaired runs of that report (D5), and by running an example in a fresh clone of the commit before
-it was pushed (E4). Nothing below is a generic best-practice list. Where nobody is known to have
-believed a wrong explanation, "The false story" says so and names what made the defect easy to
-miss.
+repaired runs of that report (D5), by running an example in a fresh clone of the commit before it
+was pushed (E4), and by my own review of the first v3 examples on 2026-11-17, which found three
+results that the method should not have produced (B4, B5, D6; E5 turned up in the logs of the
+reruns, D7 in their results). Nothing below is a generic best-practice list. Where nobody is known to have believed a
+wrong explanation, "The false story" says so and names what made the defect easy to miss.
 
-**The organising observation: only three of the nineteen incidents stopped the pipeline (E1, E2,
-E4). In fourteen, the pipeline ran to the end and drew plausible figures, and one of those (A1) was
+**The organising observation: only three of the twenty-four incidents stopped the pipeline (E1, E2,
+E4). In eighteen, the pipeline ran to the end and drew plausible figures, and one of those (A1) was
 explained away twice instead of being found: its unrotated SH records were removed as "polarity
 flips" and "gain errors", and the poor SH fit they caused was read as a smooth background rupture.**
 
@@ -37,16 +38,21 @@ Companion document: [README.md](README.md) explains the method and the pipeline.
 | B1 | teleseismic timing referenced to the depth of E1 | forward model | all teleseismic arrivals shifted by (z1 - evdp) x vertical slowness |
 | B2 | sP shifted twice | forward model | sP of a subevent 40 km from the reference about 3 s early |
 | B3 | 0/0 correlation and NaN misfits under -Ofast | forward model | chains frozen at NaN, memory read outside the trace |
+| B4 | subevent mechanisms sat on the 30° cone | forward model | California subevents striking 120° and 127° on a fault that strikes 96-100° |
+| B5 | the top of the depth grid was a source in the sediment layer | forward model | every shallow California subevent in a 0.63-km sediment layer, mechanisms bent to match |
 | C1 | prior corridors re-attached to zeroed speckle | prior | Kamchatka support 40% instead of 16%; two published subevents on corridors |
 | D1 | one lucky chain decides the number of subevents | sampling & selection | selected N not reproducible; ensembles that mix modes |
 | D2 | the 1-subevent consolidation stored a misfit of another model | sampling & selection | calibration runs whose recorded best did not belong to its model |
 | D3 | the selection rule charged nothing per subevent | sampling & selection | two searches of the same data selected different N (Venezuela 6, 5 and 6; California 4 and 5) |
 | D4 | the centroid range cut off a late main rupture | sampling & selection | every Colombia model on the bound of its search range; selected N between 1 and 5 |
 | D5 | a subevent in the corner of its search range won the selection | sampling & selection | Vanuatu selected 3 subevents in two searches; the third fitted three regional stations from the bounds of its range |
+| D6 | the first subevent was fixed at the epicentre only, and the rupture clock at its centroid | sampling & selection | Chile's E1 19 km below the hypocentre; Venezuela's E1 -> E2 at 5.5 km/s |
+| D7 | a model without a free slot in time could only grow at its end | sampling & selection | Chile selected 3 subevents with one set of chain seeds and 5 with another |
 | E1 | fresh clone has no greenFuncDir_disp; the clean-up then deletes every Green's function | systems | run aborts after the longest stage |
 | E2 | fixed array limits | systems | step 3 aborted for 108 and 232 teleseismic stations |
 | E3 | silent crashes hidden by unchecked exit codes | systems | Qt backend abort in caldens.py, orphaned MPI jobs, clobbered arguments |
 | E4 | an example started before the build used another fk from the PATH | systems | regional Green's functions computed with a program that is not the bundled one; the run stops only in step 4 |
+| E5 | the cap on parallel Green's-function jobs never held | systems | every depth of the grid started at once, whatever SUBMIT_NCORE said |
 | F1-F8 | defects found by an independent review of the v3 code, each checked before it was fixed | review | see section F |
 
 Each incident uses the same template: **Symptom → The false story → Root cause → Fix →
@@ -315,6 +321,110 @@ explicitly; the Makefile adds `-fno-finite-math-only`.
 **Invalidated artifacts.** Runs with NaN chains.
 
 **Generalisable lesson.** Fast-math flags remove exactly the checks that catch degenerate input.
+
+## B4 — Subevent mechanisms sat on the 30° cone
+
+**Symptom.** Found when I reviewed the first v3 examples (2026-11-17): on the Mendocino transform
+fault, which strikes 96-100°, the first and third California subevents struck 120° and 127°, and the
+fourth dipped 48°. In the selected v3 models of California, Venezuela and Chile the worst P or T
+axis lay 28.8-29.9° from that of the summed tensor.
+
+**The false story.** That a penalty which every best model escaped was doing its job. I had
+tabulated the worst axis of every model (`lcurve.txt`, README section 4.6), written that it "sat at
+26-30°: a limit the models lean on, not a cost they pay", and left it there.
+
+**Root cause.** The mechanisms were free inside a 30° cone and the wall began at its edge, so the
+least squares used the whole cone. For California it had a reason to: the P waves of that
+strike-slip earthquake are larger than a vertical strike-slip source predicts (a single subevent
+with the catalogue mechanism at 9 km underpredicts the P displacement records by a median factor of
+5.6 and the SH records by 2.6), and a small dip-slip part of the tensor radiates P far more
+efficiently than its strike-slip part.
+
+**Fix.** A Gaussian prior on the angle between each subevent's tensor and the double couple of the
+total tensor (`MechanismSigma` in `Par.file`, default 10°; `programs/code_SubMIT/forward_model.c`).
+It enters the second least-squares solve, relative to each subevent's own moment, and the sampled
+misfit as the factor exp(σ² Σ (γ_i / MechanismSigma)²), which is the same prior in the units of the
+sampler. A subevent 20° from the reference costs 1% of misfit, one at 45° costs 5%, as much as a
+subevent. The cone stays as the hard limit. Measured on the published California configuration
+(32 ranks; 16 ranks for 20° and 5°): 20° left the eastern subevent on the cone; 10° brought E1 and
+E2 within 6° of the total mechanism at 3.4% higher data misfit and left a dip of 54-57° on the two
+eastern subevents; 5° aligned all four within 10°, at 17% higher data misfit. A prior weighted by
+the total moment instead of each subevent's own left the smallest subevents (Mw 6.2-6.4 of a total
+of 7.0) on the cone. Without the cone, and with the depth grid out of the sediment (B5), the prior
+alone allowed a subevent of Mw 7.0 with the opposite sense of slip.
+
+In the rebuilt examples (`examples/<name>/reference/RESULTS.md` lists the angle of every
+subevent) the first four subevents of Venezuela lie 4-12° from the reference double couple and its
+late fifth one 28°; six of Kamchatka's seven lie 3-13° away and the second 28°; Chile's four lie 7-14° away.
+California's four subevents all strike 96-102°. Its two large ones still lie 29° and 33° from the
+reference, with dips of 67° and 50° on a fault that is close to vertical: B5 says what bends them,
+and with `MechanismSigma= 5` a second subevent lowers the misfit by 1.4% where it lowered it by
+11%, and the example selects one subevent (4.7971, 4.7297, 4.7576, 4.7377 and 4.7626 for one to
+five subevents).
+
+**Permanent regression test.** `tests/test_regressions.py::test_selection_and_sampler_use_the_same_posterior_width`
+(the prior uses the σ of the sampler);
+`::test_results_table_lists_the_speed_since_e1_began_and_the_angle_from_the_total_mechanism` (every
+subevent's angle is written where a reader sees it);
+`::test_bundled_models_keep_the_first_subevent_at_the_hypocentre_and_obey_the_speed_cap` (every
+bundled `Par.file` carries the prior).
+
+**Invalidated artifacts.** The mechanisms of the v3 examples of 2026-11-17 (commit 5921d13).
+
+**Generalisable lesson.** **A constraint that every best model touches is choosing the model. A
+prior that grows from zero says how much a deviation costs; a wall only says where it stops.**
+
+## B5 — The top of the depth grid was a source in the sediment layer
+
+**Symptom.** In every v3 run of the California example the three shallow subevents of the selected
+model lay at 3.0-3.1 km, the top node of the depth grid.
+
+**The false story.** That a depth on its bound was harmless. D5 names these three subevents and
+says "depth, duration and position touch their limits in most good runs".
+
+**Root cause.** The depth grid started at 3 km whatever the velocity column held. The source-side
+model of the teleseismic Green's functions keeps the water and the sediments of CRUST1.0, and at
+the California epicentre that is 2.75 km of water over 0.63 km of sediment with Vs 0.34 km/s: the
+3-km node was a source in that sediment. Its teleseismic P Green's functions are 11 (dd) and 29
+(ds) times those of the 5-km node, and they ring for 100 s at 7.4 s, the quarter-wavelength S
+resonance of the layer (4 × 0.63 km / 0.34 km/s). A subevent there needs only a few percent of
+dip-slip moment to produce P waves as large as the data, so the search put every shallow subevent
+on that node and bent its mechanism (B4). Moving the three subevents of the published model from 3
+to 5 km, at the same times and positions, rotates their solved mechanisms by 67-71° and raises the
+data misfit from 1.43 to 2.44.
+
+**Fix.** `programs/gf_SubMIT/loc/doloc.sh` starts the grid at least 0.5 km below the water and the
+soft sediments (Vs < 2 km/s) of the column, the layers that it already strips from the regional
+model: 4 km for California and for Venezuela (2.51 km of sediments), 8 km for Kamchatka, unchanged
+for Chile.
+`programs/gf_SubMIT/dotel.sh` reads that grid instead of deriving it a second time. With sources in
+rock the misfit of the California example is about twice as high as before (1-subevent run: 4.80
+against 2.39), because a strike-slip source in rock does not reproduce the P amplitudes; that
+number is what this model can explain of these data.
+The 4-subevent model of the rebuilt example has its two large subevents at 12 and 14 km and
+two small ones at 4 km, the top of the grid, and a misfit of 3.79.
+
+What the grid could not repair is in the P waves themselves. Of the 71 P displacement records, the
+39 at azimuths from 300° over north to 90° have their spectral peak at 15.6 s (quartiles 15.3-15.9
+s), the same at every azimuth, and the selected model predicts amplitudes three times smaller than
+the P and SH records (median ratio of the rms of record and prediction 3.1 for both, against
+0.9-1.5 for the three regional components; measured on `fwd_<event>_4sub/waveforms/`, which a run
+of the example writes). A column that resonates at that period was my next guess, and it failed:
+with 2.0 and 3.9 km of sediment (Vp 1.9, Vs 0.7 km/s) in the place of 0.63 km, one strike-slip
+subevent at 6-16 km depth leaves P misfits of 15-23, against 17-20 with the published column, and
+its P waves peak at 20-33 s. A column without the water layer, and one without water and
+sediment, had done no better. The oscillation is not explained, and the mechanisms of the example
+still tilt to fit it (B4).
+
+**Permanent regression test.** `tests/test_regressions.py::test_depth_grid_starts_below_water_and_soft_sediments`,
+`::test_teleseismic_green_functions_use_the_depth_grid_and_every_record_of_the_run`,
+`::test_bundled_depth_grids_start_in_rock`.
+
+**Invalidated artifacts.** The California example of v2 and of v3 (depths, mechanisms, misfits).
+
+**Generalisable lesson.** **A lower misfit is not evidence for a model when the Green's function
+that produced it has no physical source. Check what a node of the search grid is before trusting
+what sits on it.**
 
 ---
 
@@ -589,6 +699,131 @@ table (written 2026-11-17, never committed).
 model is free: a bound repeats perfectly. Before trusting a best model, ask where it sits in its
 search range.**
 
+## D6 — The first subevent was fixed at the epicentre only, and the rupture clock at its centroid
+
+**Symptom.** Found when I reviewed the first v3 examples (2026-11-17). Chile: E1 at 142 km for a
+hypocentre at 122.9 km. Venezuela: E1 at the epicentre at 15.8 s and E2 127 km away at 38.7 s, 5.5
+km/s between them, where other studies find an eastward rupture of about 200 km in about 60 s.
+
+**The false story.** For Chile, none: E1's depth had been a search parameter since v2, and nobody
+set it against the hypocentre. For Venezuela, mine: the README of v3 described "a small subevent
+(Mw 6.5) at the epicenter at 16 s" as a result.
+
+**Root cause.** Three choices that looked harmless one by one.
+- E1 was pinned at the epicentre because the rupture starts there, but its depth was searched.
+  Since B1 the arrival times refer to the catalogue depth, so nothing tied E1 to it: in every v3
+  run of Chile (two seeds, N = 2 to 5) E1 lay at 137-146 km.
+- Causality was measured from E1's centroid, |x_i - x_1| <= v_max (t_i - t_1). A subevent that
+  lasts 7 s has its centroid 3.5 s after it starts. With E1 at the hypocentre depth, that rule cost
+  Chile 26% of misfit (0.9207 against 0.7318, 4 subevents) and sent the fourth subevent to 75 km at
+  23 s: the deepest moment, 168 km at 10 s, cannot be reached from the centroid of E1 at the S
+  speed, but it can from the time E1 starts.
+- The cap v_max was 1.5 Vs for a shallow strike-slip event, 5.85 km/s for Venezuela, and the best
+  model used it: E1 -> E2 at 5.5 km/s, from an E1 that was a 4.5-s pulse of Mw 6.5 worth 0.1% of
+  misfit (2.0591 without it against 2.0562). The S velocity itself came from iasp91 at the
+  catalogue depth, 3.4 km/s for California (0.65 km), whose subevents lie in oceanic mantle with
+  4.4 km/s.
+
+**Fix.** `programs/code_SubMIT/finv.f90`: with two or more subevents E1 sits at the hypocentre,
+epicentre and catalogue depth (moved into the depth grid when it lies outside), and the rupture
+front leaves it when its moment rate begins: |x_i - x_1| <= v_max (t_i - s_1), s_1 = t_1 - T_1/2.
+`programs/prepare_SubMIT/get_search_par.py`: v_max is the mean S velocity of the source-side model
+over the depth range of the search, for every event (Chile 4.51, Kamchatka 4.23, California 4.24,
+Venezuela 3.83 km/s); a supershear rupture has to be asked for by hand. Measured on the published
+configurations (32 ranks, S speed of iasp91 as cap): Chile, 4 subevents: E1 at 122.9 km, then 142,
+167 and 158 km, misfit 0.7963, 9% above the model with a free depth. Venezuela, 5 subevents: E1 at
+2.4 s, E1 -> E2 at 3.6 km/s, misfit 2.0322 against 2.0562. Kamchatka, 7 subevents: the same seven
+subevents, 0.8333 against 0.8193. Colombia (D4), with the mechanism prior of B4: E1 at the
+hypocentre depth of 116 km instead of 83 km, 1.4660 with 2 subevents and 1.3989 with 3.
+
+In the rebuilt examples every first subevent sits at the hypocentre: 122.9 km for Chile, 20.3 km
+for Venezuela, 20.7 km for Kamchatka, and for California the top of the depth grid, 4 km, because
+its catalogue depth of 0.65 km lies in the water layer of the source model. The speeds since E1
+began are 3.8, 3.2, 2.8 and 1.5 km/s for Venezuela (cap 3.83), 3.8, 3.5 and 0.4 km/s for
+California (4.24), 2.1-2.8 km/s for Kamchatka (4.23) and 3.0, 3.4 and 4.5 km/s for Chile (4.51).
+Venezuela's first large subevent and Chile's deepest one sit on the cap. For Venezuela the cap
+costs nothing: with 5.5 km/s the 5-subevent misfit is 2.2321 against 2.2433, the three large
+subevents stay where they are, and only E1 moves, from 3.9 to 15.5 s. For Chile it costs 1%: with
+6 km/s the 5-subevent misfit is 0.7763 against 0.7840, at the same depths, with the third and
+fourth subevents at 4.8 and 5.0 km/s.
+
+A stricter rule was tried first and dropped: E1 starting at the origin time (t_1 = T_1/2), with
+causality from the origin time. In tests on the published configurations it gave the same Chile
+and Venezuela models (a full run of Venezuela under it selected six subevents, 2.1863, where the
+adopted rule selects five, 2.2433, with the large subevents in the same place). But an earthquake
+whose first resolvable moment release starts late then needs one more subevent for its quiet
+beginning, and the search did not find it: Colombia (first pulse from 17 s on) fit 1.6229 with two
+subevents and 1.6411 with three, also with whole islands of chains started cold (1.6592), against
+1.4660 and 1.3989 with the rule that was adopted, and Kamchatka (18 s) kept six subevents for the
+part that seven had described (0.9065 against 0.8333 at the limit of seven).
+
+**What the rule does not promise.** The speed between two centroids, read off the figure, can
+exceed the cap when subevents overlap in time: Chile's E3 (5.9-9.4 s, centroid 7.6 s) and E4
+(5.8-14.9 s, centroid 10.4 s) lie 21 km apart. The cap holds for the distance of each centroid from the
+hypocentre divided by the time since E1 began; RESULTS.md lists that speed.
+
+**Permanent regression test.** `tests/test_regressions.py::test_causality_cap_is_the_mean_s_velocity_of_the_searched_depths`,
+`::test_convergence_report_lists_only_the_sampled_parameters_of_the_first_subevent`,
+`::test_bundled_models_keep_the_first_subevent_at_the_hypocentre_and_obey_the_speed_cap`.
+
+**Invalidated artifacts.** The four v3 examples of 2026-11-17 (commit 5921d13): the depth of every
+E1 and the speeds read between E1 and the later subevents.
+
+**Generalisable lesson.** **A reference point has to be fixed in every coordinate that defines it,
+and a speed has to be measured from an event, not from the middle of a pulse.**
+
+## D7 — A model without a free slot in time could only grow at its end
+
+**Symptom.** With the rules of D6, two searches of the Chile example that differ only in the seeds
+of their chains agreed within 0.3% up to four subevents (0.8733 and 0.8707 with three, 0.8599 and
+0.8595 with four) and then parted: five subevents ended at 0.8714 in one search, above its own
+four, and at 0.7819 in the other. The first selected 3 subevents, the second 5.
+
+**The false story.** That a warm start makes the search for N begin at the misfit of N-1 (my
+comment in `finv.f90` said so), and that what remains is search noise of a few percent, which the
+5% price of a subevent absorbs. The first search began its 5-subevent run at 0.8716, 1.4% above
+its 4-subevent model, and never left that start.
+
+**Root cause.** The warm chains add one subevent drawn from the prior to the best model of N-1,
+and the new subevent has to keep 2.5 s from its neighbours. Chile's four subevents follow each
+other at 3.6, 6.1, 9.8 and 14.2 s: no two of them leave the 5 s that a subevent between them needs,
+so every warm draw appended the new subevent after the last one, where it found nothing to fit. The
+better model has it between the second and the third subevent, with all five moved (2.6, 5.1, 8.2,
+10.9 and 14.6 s), which no single move reaches from the warm start. One island of chains of the
+second search reached it; the other seven islands of the two searches stayed at the warm start.
+Chile is such a model since D6: with the first subevent
+at the hypocentre and a rupture near the S speed, its subevents are packed against the time-gap
+rule and the speed cap.
+
+**Fix.** `programs/code_SubMIT/finv.f90` (`draw_warm_start_model`): when no two subevents of the
+N-1 model leave a free slot between them, half of the warm draws insert the new subevent between
+two neighbours, interpolated in time, position and depth, and move the centroid times of the other
+subevents apart until every gap is 2.5 s again. A drawing of the new subevent next to an existing
+one, without moving the others, was tried first and changed nothing (0.8699 and 0.8683 against
+0.8714), because the time-gap rule rejects those draws. With the insertion the 5-subevent search
+from the same 4-subevent model started at 0.850-0.854 and ended at 0.7795, 0.7801 and 0.7827 with
+three sets of seeds. All twelve islands of chains had the model before the last resampling round
+(0.777-0.786); without the insertion one island of eight had it (0.8131, the others 0.863-0.871).
+A model with a free slot is drawn as before and consumes the same random numbers: the 3-subevent
+California search repeated its misfit of 4.3285 with byte-identical chain files.
+
+In the full reruns of the example the insertion acts one step earlier, on the 3-subevent model
+(3.6, 6.4 and 10.1 s), which has no free slot either. The two searches then agree within 0.6% at
+every N and find the same four subevents (0.8124 and 0.8102, where the old starts had ended at
+0.8599 and 0.8595, each subevent within 0.3 s and 5 km of its counterpart); a fifth subevent lowers
+the misfit by 3.5% and 3.8%, less than it costs, and both searches select 4.
+
+**Permanent regression test.** `tests/test_regressions.py::test_bundled_chile_search_from_a_model_without_a_free_slot_ends_below_it`.
+
+**Invalidated artifacts.** The Chile runs of 2026-11-17 afternoon with four or more subevents
+(never published). The other three examples have no model without a free slot and are unchanged.
+Of the test events, Tonga has such models with two and three subevents; run again, it selects one
+subevent as before (three subevents: 1.1986, where the old start had ended at 1.2045).
+
+**Generalisable lesson.** **Starting next to the previous best model helps only when the better
+model is one move away. Check where a warm start begins: a search that starts above the misfit it
+was given has been handed a start that it cannot use.**
+
 ---
 
 # E · Systems
@@ -702,6 +937,27 @@ built programs.
 
 **Generalisable lesson.** **A program called by name is whichever one the machine finds first. A
 pipeline that ships its own has to check that its own is the one that runs.**
+
+## E5 — The cap on parallel Green's-function jobs never held
+
+**Symptom.** `doloc.sh: 113: jobs: Illegal option -r`, 27 times in the log of every California run
+and 168 times in every Chile run, since v3.
+
+**The false story.** None; the lines scrolled past in a log that ended well.
+
+**Root cause.** `doloc.sh` and `dotel.sh` cap their parallel fk and mtel3 jobs with `jobs -rp`, a
+bash builtin option, and were started with `sh`, which is dash on Debian and Ubuntu. The count was
+empty, the test passed at once, and every depth of the grid was started together (56 for Chile),
+whatever `SUBMIT_NCORE` said.
+
+**Fix.** `./submit` and `programs/step2_prepare_inversions.sh` start both scripts with `bash`.
+
+**Permanent regression test.** `tests/test_regressions.py::test_green_function_scripts_that_count_their_jobs_are_started_with_bash`.
+
+**Invalidated artifacts.** None; the Green's functions were complete.
+
+**Generalisable lesson.** A message that repeats in every log of a run that ends well is still an
+error message.
 
 ---
 

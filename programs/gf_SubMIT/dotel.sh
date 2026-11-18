@@ -10,32 +10,21 @@ fi
 path=$(pwd)
 nm=$(echo "$path" | awk -F'/' '{print $(NF)}' | sed 's/^gf_//')
 invd=../inv_${nm}; [ -d "$invd" ] || invd=../inv_${nm}_1sub
-evdp=$(saclst evdp f  ${invd}/data/*.z | sort -nk2 | head -1| gawk '{print int($2)}')
 SUBMIT_DELTAT=$(gawk -F= '/^DELTAT=/{print $2}' ../programs/submit.conf 2>/dev/null)
 export SUBMIT_DELTAT=${SUBMIT_DELTAT:-1}
-# event-adaptive depth aperture: a deep intraslab rupture (evdp > 60 km) can
-# run tens of km up-/down-dip inside the steeply dipping slab (2024 Chile M7.4:
-# subevents to evdp+51 km), so the fixed +/-20 grid clips it; scale the
-# half-width with the Wells-Coppersmith length. Shallow events keep +/-20
-# (depth extent bounded by seismogenic width; crustal cap in get_search_par).
-mw=$(gawk -v ev="$nm" '$1==ev{print $4; exit}' ../event_list.dat)
-halfw=20
-if [ "$evdp" -gt 60 ] && [ -n "$mw" ]; then
-    halfw=$(gawk -v mw="$mw" 'BEGIN{h=int(0.65*10^(0.59*mw-2.44)+0.5); if(h<20)h=20; if(h>70)h=70; print h}')
-fi
-depth_min=$((evdp - halfw))
-if [ "$depth_min" -lt 3 ]; then
-    depth_min=3
-fi
-depth_max=$((evdp + halfw))
-if [ -n "$SUBMIT_GF_INPUTS" ] && [ -f "$SUBMIT_GF_INPUTS/distdep.dat" ]; then
-    read _a _b _c depth_min depth_max _d < "$SUBMIT_GF_INPUTS/distdep.dat"
-    echo "dotel: using published depth grid $depth_min-$depth_max km"
-fi
+# The depth grid is the one of the regional Green's functions (loc/distdep.dat, written by
+# loc/doloc.sh, which runs first): event-adaptive aperture, start in rock, or the published grid of
+# an example. Until 2026-11-17 this script derived the grid again with a copy of doloc.sh's rule.
+read -r _dist_min _dist_max _dist_step depth_min depth_max _depth_step < loc/distdep.dat \
+    || { echo "dotel: no loc/distdep.dat - run loc/doloc.sh first"; exit 1; }
+echo "dotel: depth grid $depth_min-$depth_max km (loc/distdep.dat)"
 # UNION of P (.z) and SH (.t) distances: an SH-only station (P screened out,
 # transverse kept) otherwise gets NO Green's functions and sub_init reads
-# silent garbage for it (2024 Chile AU.MAW); forward_model.c now stops on a missing file
-gcdistlst=$(saclst dist f  ${invd}/data/vel_*.z ${invd}/data/vel_*.t 2>/dev/null | gawk '{printf("%d\n",$2)}' | sort -n | uniq | tr '\n' ' ')
+# silent garbage for it (2024 Chile AU.MAW); forward_model.c now stops on a missing file.
+# Every .z and .t record counts: the list used to be built from vel_*.z and vel_*.t, but there are
+# no velocity transverse records, so a rebuild after the model-based screen had removed the vertical
+# records of six California stations left their SH records without Green's functions (2026-11-17).
+gcdistlst=$(saclst dist f  ${invd}/data/*.z ${invd}/data/*.t 2>/dev/null | gawk '{printf("%d\n",$2)}' | sort -n | uniq | tr '\n' ' ')
 
 depi=2
 model=vmodel

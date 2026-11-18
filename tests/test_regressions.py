@@ -262,10 +262,13 @@ def test_selection_and_sampler_use_the_same_posterior_width():
     # constants live in different files and must not drift apart
     sampler_source = open(os.path.join(programs, "code_SubMIT", "finv.f90")).read()
     selection_source = open(os.path.join(programs, "prepare_SubMIT", "plot_lcurve.py")).read()
+    forward_source = open(os.path.join(programs, "code_SubMIT", "forward_model.c")).read()
     sampler_sigma = float(re.search(r"sigma_relative\s*=\s*([0-9.]+)", sampler_source).group(1))
     selection_sigma = float(re.search(r"^posterior_sigma\s*=\s*([0-9.]+)", selection_source, re.MULTILINE).group(1))
+    # the mechanism prior of the forward code weighs an angle against a change of misfit with the same width
+    forward_sigma = float(re.search(r"const double posterior_sigma\s*=\s*([0-9.]+)", forward_source).group(1))
     parameters_per_subevent = int(re.search(r"^parameters_per_subevent\s*=\s*(\d+)", selection_source, re.MULTILINE).group(1))
-    assert sampler_sigma == selection_sigma, (sampler_sigma, selection_sigma)
+    assert sampler_sigma == selection_sigma == forward_sigma, (sampler_sigma, selection_sigma, forward_sigma)
     assert abs(2 * parameters_per_subevent * selection_sigma**2 - 0.05) < 1e-12
 
 
@@ -299,6 +302,235 @@ def test_submit_refuses_to_start_before_the_bundled_codes_are_built():
             assert result.returncode != 0, result
             assert "is not built - run ./submit build first" in result.stderr, result.stderr
             assert not os.path.exists(os.path.join(folder, "work")), "the example was set up before the check"
+
+
+# ---------------------------------------------------------------------------
+# depth grid and Green's functions (PITFALLS B5)
+# ---------------------------------------------------------------------------
+def first_rock_depth_of(model_rows):
+    """the first depth (km) that programs/gf_SubMIT/loc/doloc.sh allows for a CRUST1.0 column, given as
+    rows of (Vp, Vs, density, thickness): the two lines of the script are run as they stand"""
+    script = open(os.path.join(programs, "gf_SubMIT", "loc", "doloc.sh")).read()
+    rule_lines = [line for line in script.splitlines() if line.startswith(("soft_column_km=", "first_rock_depth="))]
+    assert len(rule_lines) == 2, rule_lines
+    with tempfile.TemporaryDirectory() as folder:
+        with open(os.path.join(folder, "vmodel.txt"), "w") as model:
+            for row in model_rows:
+                model.write(" ".join(str(value) for value in row) + "\n")
+        output = run_in(folder, ["bash", "-c", "\n".join(rule_lines) + '\necho "$soft_column_km $first_rock_depth"'])
+    soft_column, first_depth = output.split()
+    return float(soft_column), int(first_depth)
+
+
+def test_depth_grid_starts_below_water_and_soft_sediments():
+    # 2024 California: 2.75 km of water over 0.63 km of sediment with Vs 0.34 km/s; the 3-km node of
+    # the old grid was a source in that sediment, and every shallow subevent of the v3 models sat on it
+    california = [(1.50, 0.01, 1.02, 2.75), (1.75, 0.34, 1.82, 0.63), (5.00, 2.70, 2.55, 0.64), (6.50, 3.70, 2.85, 1.41),
+                  (7.10, 4.05, 3.05, 4.38), (7.90, 4.40, 3.26, 0)]
+    assert first_rock_depth_of(california) == (3.38, 4)
+    # 2025 Kamchatka: 2.45 km of water and 5 km of sediments below 2 km/s
+    kamchatka = [(1.50, 0.01, 1.02, 2.45), (2.00, 0.55, 1.93, 2.00), (3.50, 1.79, 2.31, 3.00), (5.00, 2.70, 2.55, 0.86),
+                 (6.50, 3.70, 2.85, 1.88), (7.77, 4.33, 3.20, 0)]
+    assert first_rock_depth_of(kamchatka) == (7.45, 8)
+    # 2024 Chile: 60 m of sediment; the 3-km minimum of the grid stays the limit
+    chile = [(2.50, 1.08, 2.11, 0.06), (6.00, 3.50, 2.72, 14.30), (8.18, 4.54, 3.37, 0)]
+    assert first_rock_depth_of(chile) == (0.06, 1)
+    # a soft layer below rock is not part of the column that is skipped
+    buried_soft_layer = [(6.00, 3.50, 2.72, 5.0), (3.00, 1.50, 2.30, 2.0), (8.00, 4.50, 3.30, 0)]
+    assert first_rock_depth_of(buried_soft_layer) == (0.0, 1)
+
+
+def test_green_function_scripts_that_count_their_jobs_are_started_with_bash():
+    # "jobs -rp" caps the parallel fk and mtel3 jobs; dash, which is sh on Debian and Ubuntu, answers
+    # "Illegal option -r", so under "sh doloc.sh" the cap never held
+    for script in ("gf_SubMIT/loc/doloc.sh", "gf_SubMIT/dotel.sh"):
+        assert "jobs -rp" in open(os.path.join(programs, script)).read(), script
+    for caller in (os.path.join(programs, "step2_prepare_inversions.sh"), os.path.join(repository_root, "submit")):
+        source = open(caller).read()
+        assert "bash doloc.sh" in source and "bash dotel.sh" in source, caller
+        assert not re.search(r"(?<!ba)sh do(loc|tel)\.sh", source), caller
+
+
+def test_teleseismic_green_functions_use_the_depth_grid_and_every_record_of_the_run():
+    # dotel.sh derived the depth grid with its own copy of doloc.sh's rule, and listed the station
+    # distances from vel_*.z and vel_*.t: there are no velocity transverse records, so a rebuild after
+    # the model-based screen left six SH-only California stations without Green's functions
+    script = open(os.path.join(programs, "gf_SubMIT", "dotel.sh")).read()
+    assert "< loc/distdep.dat" in script and "halfw" not in script, "dotel.sh has to read the grid that doloc.sh wrote"
+    distance_line = next(line for line in script.splitlines() if line.startswith("gcdistlst="))
+    assert "data/*.z" in distance_line and "data/*.t" in distance_line and "vel_" not in distance_line, distance_line
+
+
+# ---------------------------------------------------------------------------
+# the first subevent at the hypocentre, and the speed cap counted from the time it begins (PITFALLS D6)
+# ---------------------------------------------------------------------------
+def test_causality_cap_is_the_mean_s_velocity_of_the_searched_depths():
+    # the cap was the S velocity of iasp91 at the catalogue depth (3.4 km/s for the California example,
+    # whose subevents lie in oceanic mantle with 4.4 km/s), times 1.5 for shallow strike-slip events
+    california_model = """#vmodel
+10 1.50 0.01 1.02 2.75
+1.75 0.34 1.82 0.63
+5.00 2.70 2.55 0.64
+6.50 3.70 2.85 1.41
+7.10 4.05 3.05 4.38
+7.90 4.40 3.26 25
+8.2 4.5 3.4 250
+8.8 4.77 3.51 100
+9.7 5.28 3.88 250
+10.9 6.1 4.4 0
+3 5.8 3.36 2.72 20
+6.5 3.75 2.92 15
+8.04 4.47 3.32 0
+"""
+    with tempfile.TemporaryDirectory() as folder:
+        os.makedirs(os.path.join(folder, "gf_test"))
+        os.makedirs(os.path.join(folder, "inv_test_2sub"))
+        open(os.path.join(folder, "gf_test", "vmodel"), "w").write(california_model)
+        script = ("import sys; sys.path.insert(0, sys.argv[1]); import get_search_par as g; "
+                  "print(g.mean_s_velocity_of_source_model('test', 4, 20), g.mean_s_velocity_of_source_model('test', 300, 700), "
+                  "g.mean_s_velocity_of_source_model('test', 20, 4))")
+        output = run_in(os.path.join(folder, "inv_test_2sub"), [sys.executable, "-c", script, os.path.join(programs, "prepare_SubMIT")])
+    rock_grid_mean, deep_mean, empty_range = output.split()
+    # 0.02 km at 2.70, 1.41 km at 3.70, 4.38 km at 4.05 and 10.19 km at 4.40 km/s
+    assert abs(float(rock_grid_mean) - 4.24) < 0.005, output
+    # 300-384.81 km in the 4.77 layer, 384.81-634.81 in the 5.28 layer, the rest in the half-space
+    expected_deep = (84.81 * 4.77 + 250 * 5.28 + 65.19 * 6.1) / 400
+    assert abs(float(deep_mean) - expected_deep) < 0.005, output
+    assert empty_range == "None", output
+    source = open(os.path.join(programs, "prepare_SubMIT", "get_search_par.py")).read()
+    assert "vfac = -1.5" not in source, "no automatic supershear headroom (PITFALLS D6)"
+
+
+def test_results_table_lists_the_speed_since_e1_began_and_the_angle_from_the_total_mechanism():
+    # the figure shows centroids; the causality rule acts on the distance from E1 over the time since
+    # E1 began, and the mechanism prior on the angle from the double couple of the catalogue tensor
+    with tempfile.TemporaryDirectory() as folder:
+        inversion, forward = os.path.join(folder, "inv_test_2sub"), os.path.join(folder, "fwd_test_2sub")
+        os.makedirs(inversion)
+        os.makedirs(forward)
+        # E1 lasts 6 s around 4 s, so it begins at 1 s; E2 lies 50 km away 10 s after that
+        open(os.path.join(forward, "Input.model"), "w").write("4.0 0.0 0.0 6.0 0.01 0.0 10.0\n11.0 30.0 40.0 5.0 0.01 0.0 10.0\n")
+        # fm.dat: Mxx Mxy Mxz Myy Myz Mzz. E1 is a vertical strike-slip fault striking north or east; E2 is
+        # the same mechanism with its strike turned by 15 degrees
+        turned = np.radians(2 * 15.0)
+        open(os.path.join(forward, "fm.dat"), "w").write(
+            "1e27 0.0 1.0 0.0 0.0 0.0 0.0\n" + f"1e27 {-np.sin(turned):.6f} {np.cos(turned):.6f} 0.0 {np.sin(turned):.6f} 0.0 0.0\n")
+        open(os.path.join(forward, "misfit.dat"), "w").write("1.0000\n")
+        open(os.path.join(inversion, "totalmt.dat"), "w").write("0.0\n0.0\n1.0\n0.0\n0.0\n")
+        run_in(folder, [sys.executable, os.path.join(programs, "fwd_SubMIT", "make_results_doc.py"), "test", "2"])
+        table = [line for line in open(os.path.join(folder, "figs_and_results", "RESULTS.md")) if line.startswith("| E")]
+    first, second = ([cell.strip() for cell in line.strip().strip("|").split("|")] for line in table)
+    assert first[7:9] == ["0", "-"] and first[10] == "0", first
+    assert second[7:9] == ["50", "5.00"], second
+    assert second[10] == "30", second
+    strikes = sorted(round(float(plane.split("/")[0])) % 180 for plane in first[9].split(";"))
+    assert strikes == [0, 90], first[9]
+    turned_strikes = sorted(round(float(plane.split("/")[0])) % 90 for plane in second[9].split(";"))
+    assert turned_strikes in ([15, 15], [75, 75]), second[9]
+
+
+def write_chain_file(folder, chain, rows_of_subevents):
+    """one chain file in finv's format: per sample, 8 numbers per subevent in 10-character fields
+    (misfit, centroid time, x, y, duration, rupture velocity, rupture direction, depth)"""
+    with open(os.path.join(folder, f"{chain}chain.dat"), "w") as chain_file:
+        for subevents in rows_of_subevents:
+            chain_file.write(f"{len(subevents):2d} <neq " + "".join(f"{value:10.4f}" for subevent in subevents for value in subevent) + "\n")
+
+
+def test_convergence_report_lists_only_the_sampled_parameters_of_the_first_subevent():
+    # E1 of two or more subevents sits at the hypocentre: finv samples its centroid time and its
+    # duration only, and a split R-hat of its constant position and depth is 0/0
+    generator = np.random.default_rng(7)
+    with tempfile.TemporaryDirectory() as folder:
+        for chain in range(4):
+            samples = []
+            for _ in range(60):
+                first = (1.0, 4 + generator.normal(0, 0.3), 0.0, 0.0, 6 + generator.normal(0, 0.3), 0.01, 0.0, 122.9)
+                second = (1.0, 9 + generator.normal(0, 0.3), 5 + generator.normal(0, 1), -3 + generator.normal(0, 1),
+                          8 + generator.normal(0, 0.3), 0.01, 0.0, 150 + generator.normal(0, 2))
+                samples.append((first, second))
+            write_chain_file(folder, chain, samples)
+        run_in(folder, [sys.executable, os.path.join(programs, "hist", "posterior_summary.py")])
+        report = open(os.path.join(folder, "convergence.txt")).read()
+    first_line = next(line for line in report.splitlines() if line.strip().startswith("E1:"))
+    second_line = next(line for line in report.splitlines() if line.strip().startswith("E2:"))
+    assert re.fullmatch(r"\s*E1: centroid time [0-9.]+, duration [0-9.]+", first_line), first_line
+    assert all(name in second_line for name in ("centroid time", "x east", "y north", "duration", "depth")), second_line
+    assert "nan" not in report, report
+
+
+def test_bundled_models_keep_the_first_subevent_at_the_hypocentre_and_obey_the_speed_cap():
+    # every best model of every bundled example with two or more subevents: E1 at the epicentre and at the
+    # catalogue depth (moved into the depth grid), and no centroid ahead of a front that leaves E1 with
+    # vmax_cau when E1 begins. The first v3 examples had E1 14-23 km below the Chile hypocentre and
+    # Venezuela's E1 -> E2 at 5.5 km/s (PITFALLS D6); their Par.file had no mechanism prior (B4).
+    checked_model_count = 0
+    for example in sorted(glob.glob(os.path.join(repository_root, "examples", "*", "frozen"))):
+        hypocentre_depth = float(open(os.path.join(os.path.dirname(example), "event_list.dat")).read().split()[-1])
+        for folder in sorted(glob.glob(os.path.join(example, "*sub"))):
+            subevent_count = int(os.path.basename(folder)[:-3])
+            if subevent_count < 2:
+                continue
+            search = dict(line.split()[:2] for line in open(os.path.join(folder, "search_par.file")) if len(line.split()) >= 2)
+            numbers = open(os.path.join(folder, "best_model_hybrid.dat")).read().split("<neq")[1].split()
+            # per subevent: misfit, centroid time, x east, y north, duration, rupture velocity, rupture direction, depth
+            model = np.array(numbers[:8 * subevent_count], dtype=float).reshape(subevent_count, 8)
+            expected_depth = min(max(hypocentre_depth, float(search["z_min"])), float(search["z_max"]))
+            assert abs(model[0, 2]) < 1e-3 and abs(model[0, 3]) < 1e-3, f"{folder}: E1 is not at the epicentre"
+            assert abs(model[0, 7] - expected_depth) < 0.01, f"{folder}: E1 at {model[0, 7]} km, hypocentre at {expected_depth} km"
+            speed_cap = float(search["vmax_cau"])
+            assert 2.0 < speed_cap < 6.0, f"{folder}: vmax_cau {speed_cap} is not a speed in km/s"
+            first_begins = model[0, 1] - model[0, 4] / 2
+            for subevent in range(1, subevent_count):
+                distance = np.sqrt((model[subevent, 2] - model[0, 2])**2 + (model[subevent, 3] - model[0, 3])**2
+                                   + (model[subevent, 7] - model[0, 7])**2)
+                speed = distance / (model[subevent, 1] - first_begins)
+                assert speed <= speed_cap * 1.001, f"{folder}: E{subevent + 1} at {speed:.2f} km/s, the cap is {speed_cap} km/s"
+            assert "MechanismSigma=" in open(os.path.join(folder, "Par.file")).read(), f"{folder}: no mechanism prior in Par.file"
+            checked_model_count += 1
+    assert checked_model_count >= 12, checked_model_count
+
+
+def test_bundled_chile_search_from_a_model_without_a_free_slot_ends_below_it():
+    # PITFALLS D7: the four subevents of the Chile model follow each other closer than twice the time gap,
+    # so a fifth one drawn from the prior fits only after the last. That search began at 0.8716, above the
+    # 0.8599 of four subevents, and ended at 0.8714, and the example selected 3 subevents with one set of
+    # chain seeds and 5 with another. With the insertion of finv.f90 (draw_warm_start_model) the
+    # 5-subevent search starts between the subevents and ends below the 4-subevent one.
+    sampler_source = open(os.path.join(programs, "code_SubMIT", "finv.f90")).read()
+    time_gap = float(re.search(r"t_gap_nominal\s*=\s*([0-9.]+)", sampler_source).group(1))
+    assert "warm_model_is_crowded" in sampler_source, "finv.f90 has no draw for a warm model without a free slot"
+
+    def best_model(subevent_count):
+        folder = os.path.join(repository_root, "examples", "chile", "frozen", f"{subevent_count}sub")
+        numbers = open(os.path.join(folder, "best_model_hybrid.dat")).read().split("<neq")[1].split()
+        # per subevent: misfit, centroid time, x east, y north, duration, rupture velocity, rupture direction, depth
+        return np.array(numbers[:8 * subevent_count], dtype=float).reshape(subevent_count, 8)
+
+    four, five = best_model(4), best_model(5)
+    gaps_of_four = np.diff(four[:, 1])
+    assert (gaps_of_four < 2 * time_gap).all(), f"the 4-subevent model has a free slot (gaps {gaps_of_four}): pick another crowded model"
+    assert five[0, 0] < four[0, 0], f"5 subevents ended at {five[0, 0]}, not below the {four[0, 0]} of 4 subevents"
+
+
+def test_bundled_depth_grids_start_in_rock():
+    # the depth grid of every bundled example starts at least 0.5 km below the water and the soft
+    # sediments of its source-side model (California's 3-km node was a source in 0.63 km of sediment,
+    # PITFALLS B5)
+    checked_example_count = 0
+    for inputs in sorted(glob.glob(os.path.join(repository_root, "examples", "*", "gf_inputs"))):
+        numbers = open(os.path.join(inputs, "vmodel_tel")).read().split("\n", 1)[1].split()
+        layer_count = int(numbers[0])
+        soft_column = 0.0
+        for index in range(layer_count):
+            _vp, vs, _density, thickness = (float(value) for value in numbers[1 + 4 * index:5 + 4 * index])
+            if vs >= 2.0:
+                break
+            soft_column += thickness
+        first_depth = float(open(os.path.join(inputs, "distdep.dat")).read().split()[3])
+        assert first_depth >= soft_column + 0.5, f"{inputs}: grid from {first_depth} km, soft column {soft_column} km"
+        checked_example_count += 1
+    assert checked_example_count == 4, checked_example_count
 
 
 # ---------------------------------------------------------------------------

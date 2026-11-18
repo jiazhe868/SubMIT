@@ -13,7 +13,7 @@ num_sta_Rayl= 40 #Number of all stations (regional)
 stainfofileP= stations.info #Station distance (in degree) and azimuth (P)
 stainfofileSH= stationsSH.info #Station distance (in degree) and azimuth (SH)
 stainfofileRayl= stationsloc.info
-weightP= 3.55 #
+weightP= 3.54 #
 weightSH= 1 #
 weightRayl= 0.0408
 InputModelFile= Input.model #Input model parameters
@@ -31,6 +31,7 @@ evla= -23.0813
 evvp= 8.1 #Average Vp near the source depth
 evvs= 4.5  #Average Vs near the source depth
 DCconstrain= 1 #DC constrain: 2-weak, 0.5-strong
+MechanismSigma= 10 # prior standard deviation (deg) of the angle between a subevent's moment tensor and the double couple of the total tensor; 20 = weak, 5 = strong, 0 = off
 bg_localdist= 2  # begining distance for local stations (km)
 nd_localdist= 738 # ending distance for local stations (km)
 localdist_interval= 4  # distace interval for local stations (km)

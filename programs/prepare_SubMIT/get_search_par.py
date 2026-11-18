@@ -1,5 +1,31 @@
 import sys
 
+
+def mean_s_velocity_of_source_model(event_name, depth_min, depth_max):
+    """Thickness-weighted mean S velocity (km/s) between two depths of the source-side model of the
+    teleseismic Green's functions (../gf_<event>/vmodel: a header line, then the number of source
+    layers followed by the layers as Vp Vs density thickness; the last one is a half-space with
+    thickness 0). Returns None when the model cannot be read."""
+    import glob
+    try:
+        model_file = (glob.glob(f"../gf_{event_name}/vmodel") or glob.glob("../gf_*/vmodel"))[0]
+        numbers = open(model_file).read().split("\n", 1)[1].split()
+        layer_count = int(numbers[0])
+        layers = [[float(value) for value in numbers[1 + 4 * index:5 + 4 * index]] for index in range(layer_count)]
+    except Exception:
+        return None
+    weighted_sum, layer_top = 0.0, 0.0
+    for index, (_vp, vs, _density, thickness) in enumerate(layers):
+        is_half_space = thickness <= 0 or index == layer_count - 1
+        layer_bottom = float("inf") if is_half_space else layer_top + thickness
+        overlap = min(layer_bottom, depth_max) - max(layer_top, depth_min)
+        if overlap > 0:
+            weighted_sum += vs * overlap
+        layer_top = layer_bottom
+    if depth_max <= depth_min or weighted_sum <= 0:
+        return None
+    return weighted_sum / (depth_max - depth_min)
+
 def generate_search_par_file(event_name, mw, nsubeve):
     # Define duration; giant events (M >~ 8) use length-based duration
     # (same rule as gen_par.py)
@@ -160,34 +186,29 @@ def generate_search_par_file(event_name, mw, nsubeve):
         par_file.write(f"theta_max {theta_max}\n")
         par_file.write(f"cen_min {cen_min}\n")
         par_file.write(f"cen_max {cen_max}\n")
-        # Rupture-causality cap: negative = factor of Vs inside finv.
-        # Default 1.0*Vs; shallow strike-slip events may rupture supershear, so
-        # allow up to 1.5*Vs when depth <= 35 km AND the GCMT total mechanism is
-        # strike-slip (null/B axis plunge >= 60 deg). Falls back to 1.0*Vs when
-        # totalmt.dat/mainshock.dat are unavailable.
-        vfac = -1.0
-        try:
-            import numpy as _np
-            # only trust the mechanism if totalmt.dat is a REAL solution for
-            # this event (gcmt-local/usgs); a stale template must never grant
-            # supershear headroom
-            src = open('totalmt_source.txt').read().strip()
-            assert src in ("gcmt-local", "usgs", "usgs-sum"), f"totalmt source: {src}"
-            dep = float(open('mainshock.dat').read().split()[2])
-            v = [float(x) for x in open('totalmt.dat').read().split()[:5]]
-            mxx, myy, mxy, mxz, myz = v
-            M = _np.array([[mxx, mxy, mxz], [mxy, myy, myz],
-                           [mxz, myz, -(mxx + myy)]])
-            w, vec = _np.linalg.eigh(M)
-            b_axis = vec[:, _np.argsort(w)[1]]          # intermediate (null) axis
-            plunge = _np.degrees(_np.arcsin(abs(b_axis[2])))
-            if dep <= 35 and plunge >= 60:
-                vfac = -1.5
-                print(f"get_search_par: shallow strike-slip (dep {dep:.0f} km, "
-                      f"B-plunge {plunge:.0f} deg) -> vmax_cau 1.5*Vs")
-        except Exception:
-            pass
-        par_file.write(f"vmax_cau {vfac}\n")  # negative = factor of Vs (finv)
+        # Rupture-causality cap: no centroid may lie ahead of a front that leaves the hypocentre with
+        # this speed when the first subevent starts (finv.f90). The cap is the mean S velocity of the
+        # source-side model over the depth range of the search, in km/s.
+        # Until 2026-11-17 it was the S velocity of iasp91 at the catalogue depth, times 1.5 for a
+        # shallow strike-slip event (depth <= 35 km, B-axis plunge >= 60 deg), because such events
+        # can rupture faster than the S wave. Two measured consequences (PITFALLS D6):
+        # - the best model used the headroom whether or not the data asked for it: the v3 Venezuela
+        #   example had E1 -> E2 at 5.5 km/s of an allowed 5.85, with an E1 that was worth 0.1% of
+        #   misfit; capped at the S speed, E1 -> E2 is 3.6 km/s at 1.2% lower misfit (2.0322 against
+        #   2.0562);
+        # - iasp91 at the catalogue depth is not the rock that ruptures: for the California example
+        #   (catalogue depth 0.65 km) it gave 3.4 km/s, while the model has 3.7-4.05 km/s in the
+        #   oceanic crust and 4.4 km/s in the mantle below 9.8 km, where the subevents lie; a cap of
+        #   3.4 km/s cost 8.4% of misfit there (1.6248 against 1.4992).
+        # To test a supershear rupture, raise vmax_cau by hand in the search_par.file of every
+        # inversion folder and compare the misfits.
+        cap_speed = mean_s_velocity_of_source_model(event_name, z_min, z_max)
+        if cap_speed is None:
+            print("get_search_par: no source-side model found - causality cap = S velocity of Par.file")
+            par_file.write("vmax_cau -1.0\n")      # negative = factor of the S velocity of Par.file (finv)
+        else:
+            print(f"get_search_par: causality cap {cap_speed:.2f} km/s (mean S velocity, {z_min:.0f}-{z_max:.0f} km)")
+            par_file.write(f"vmax_cau {cap_speed:.2f}\n")
 
 if __name__ == "__main__":
     event_name = sys.argv[1]

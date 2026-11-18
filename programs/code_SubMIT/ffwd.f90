@@ -20,7 +20,7 @@
 program ffwd
     implicit none
     integer, parameter :: max_subevents = 9
-    real :: model(7, max_subevents), penalized_misfit, source_s_velocity
+    real :: model(7, max_subevents), penalized_misfit, source_s_velocity, hypocentre_depth
     integer :: subevent_count, read_status, evaluated_model_count
     character(len=512) :: line, model_file_name
     logical :: is_model_list
@@ -31,7 +31,7 @@ program ffwd
     if (is_model_list) call get_command_argument(1, model_file_name)
     open(10, file=trim(model_file_name), status='old')
 
-    call sub_init(source_s_velocity)
+    call sub_init(source_s_velocity, hypocentre_depth)
     call enable_forward_outputs()
     evaluated_model_count = 0
     subevent_count = 0

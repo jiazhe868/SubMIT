@@ -5,8 +5,28 @@
 ! p(theta|d) ~ exp(-phi(theta) / (2 sigma^2 phi_ref)) * prior(theta) with sigma = 0.05 (README 4.5);
 ! the prior is the aftershock density map (seisdens.dat) times hard rules: search bounds, centroid
 ! times increasing by at least t_gap, no moment before the origin (t_i >= T_i/2), causality
-! (|x_i - x_1| <= vmax_cau (t_i - t_1)) and the 45-degree corner rule for three or more subevents.
+! (|x_i - x_1| <= vmax_cau (t_i - s_1), with s_1 = t_1 - T_1/2 the start of E1) and the 45-degree
+! corner rule for three or more subevents.
 ! Each chain writes its post-burn-in samples (NNNchain.dat) and its 50 best samples (NNNbest.dat).
+!
+! The first subevent is where the rupture starts (two or more subevents): it sits at the hypocentre,
+! epicentre and depth, and the rupture front that the causality rule limits leaves it when its moment
+! rate begins. Until 2026-11-17 E1 was pinned at the epicentre only, its depth was searched, and
+! causality was measured from E1's centroid, |x_i - x_1| <= vmax_cau (t_i - t_1), with a cap of
+! 1.5 Vs for shallow strike-slip events. Measured on the v3 runs of the examples (PITFALLS D6):
+! - Chile (hypocentre at 122.9 km): E1 at 137-146 km in every run of two seeds. With the depth pinned
+!   and causality still measured from E1's centroid, the 4-subevent misfit rose by 26% (0.9207
+!   against 0.7318) and the fourth subevent went to 75 km at 23 s: the deepest moment (168 km at 10 s)
+!   cannot be reached from the centroid of E1 (2-4 s) at the S speed, but it can from its start.
+! - Venezuela: E1 at the epicentre at 15.8 s, E2 127 km away at 38.7 s, 5.5 km/s, inside the 1.5 Vs
+!   (5.85 km/s) that the cap allowed. That E1 was a 4.5-s pulse of Mw 6.5 worth 0.1% of misfit: with
+!   E1 early the misfit was 2.0591 against 2.0562.
+! A stricter rule was tried and dropped: E1 starting at the origin time (t_1 = T_1/2), causality from
+! the origin time. It fits Chile and Venezuela as well, but an earthquake whose first resolvable
+! moment release starts late needs one more subevent for the silent beginning: Colombia (17 s) fit
+! 1.6229 with two subevents and 1.6411 with three, against 1.4660 and 1.3989 with the rule above, and
+! Kamchatka (18 s) kept six subevents for the part that seven had described (0.9065 against 0.8333
+! at the limit of seven).
 !
 ! Why a population of chains. The penalized misfit is extremely peaked (a model 1% worse has e^-2
 ! of the density) and multimodal, and independent chains settle in different local modes: in the
@@ -22,12 +42,16 @@
 !   copies of good ones, and islands keep several modes alive until that last round;
 ! - 5% of the proposals move one subevent to a position drawn from the prior (relocation), so a
 !   chain can jump between modes tens of km apart that local moves cannot connect;
-! - half of the chains start from the best N-1 model plus one subevent from the prior (warm start,
-!   warm_start.dat), so the search for N begins at the misfit already reached with N-1. The new
-!   subevent needs a free slot in time (2.5 s from its neighbours): the 4-subevent model of the
-!   32-rank California run (centroid times 5.2, 8.5, 12.8 and 15.4 s in a range that ends at 16 s)
-!   had none, and every chain of its 5- and 6-subevent runs started from the prior; the log line
-!   of each chain says which start it got;
+! - half of the chains start from the best N-1 model plus one subevent (warm start,
+!   warm_start.dat), so the search for N begins from the model already found with N-1. The new
+!   subevent is drawn from the prior and needs a free slot in time (2.5 s from its neighbours).
+!   When no two subevents of the N-1 model leave such a slot between them, half of the draws
+!   insert it between two neighbours and move the centroid times of the others apart
+!   (draw_warm_start_model, with the Chile measurement). Before the insertion existed, a model
+!   without a slot started every chain of the next N from the prior: the 4-subevent model of an
+!   early 32-rank California run (centroid times 5.2, 8.5, 12.8 and 15.4 s in a range that ended
+!   at 16 s) did so for its 5- and 6-subevent runs. The log line of each chain says which start
+!   it got;
 ! - island_best_misfits.txt records each island's best before the last round: the islands are
 !   independent searches until then, and plot_lcurve.py lists their bests next to the L-curve;
 ! - a random-walk proposal that breaks a hard rule is a rejection (PITFALLS F1).
@@ -87,6 +111,10 @@ program finv
     real :: para(max_subevents, 7), para_proposed(max_subevents, 7), para_best(max_subevents, 7)
     real :: like, like_proposed, like_best, like_reference, temperature
     real :: model_vector(7 * max_subevents), source_s_velocity
+    ! --- hypocentre: the depth that the arrival picks of the data refer to (evdp of the headers), moved
+    ! into the depth range; a negative header depth (hand-made data without evdp) leaves E1's depth free
+    real :: hypocentre_header_depth, hypocentre_depth
+    logical :: first_depth_is_pinned
     integer :: neq
     ! --- proposal widths and adaptive-Metropolis state (Haario et al. 2001)
     real :: width_x, width_y, width_z, width_duration, width_centroid
@@ -201,7 +229,13 @@ program finv
     ! one random stream per chain, seeded by rank + rank.dat offset (a different offset = a rerun
     ! with independent chains)
     random_state = rank + seed_offset
-    call sub_init(source_s_velocity)
+    call sub_init(source_s_velocity, hypocentre_header_depth)
+    first_depth_is_pinned = hypocentre_header_depth >= 0
+    hypocentre_depth = max(z_min, min(z_max, hypocentre_header_depth))
+    if (rank == 0 .and. first_depth_is_pinned) write(*, '(A, F8.2, A, F8.2, A)') ' hypocentre depth of the data headers ', &
+        hypocentre_header_depth, ' km; E1 is placed at ', hypocentre_depth, ' km'
+    if (rank == 0 .and. .not. first_depth_is_pinned) write(*, *) 'WARNING: no hypocentre depth in the data headers: ', &
+        'the depth of E1 is searched'
     if (vmax_cau < 0) vmax_cau = abs(vmax_cau) * source_s_velocity     ! negative = factor of Vs
     if (rank == 0) write(*, *) 'causality speed cap vmax_cau (km/s):', vmax_cau
 
@@ -223,8 +257,8 @@ program finv
     width_centroid = max(0.020 * (cen_max - cen_min), 0.25)
     if (rank == 0) write(*, *) 'proposal widths x,y,z,dur,cen:', width_x, width_y, width_z, width_duration, width_centroid
 
-    ! active parameters of the adaptive moves: x, y (except E1 when it is pinned at the epicentre,
-    ! i.e. for two or more subevents), depth, duration, centroid time
+    ! active parameters of the adaptive moves: x, y, depth, duration, centroid time; not the position
+    ! of E1 when it is pinned at the hypocentre, i.e. for two or more subevents
     adaptive_count = 0
     do i = 1, neq
         do k = 1, 5
@@ -232,6 +266,7 @@ program finv
             if (k == 4) j = 4
             if (k == 5) j = 7
             if (neq > 1 .and. i == 1 .and. k <= 2) cycle
+            if (neq > 1 .and. i == 1 .and. k == 3 .and. first_depth_is_pinned) cycle
             adaptive_count = adaptive_count + 1
             adaptive_subevent(adaptive_count) = i
             adaptive_column(adaptive_count) = j
@@ -316,6 +351,7 @@ program finv
         ! is; redrawing it until the rules hold samples the prior restricted to a set fixed by the other
         ! subevents, which the move leaves unchanged, so that redraw stays exact.
         call propose(move_kind, subevent_index)
+        call place_first_subevent(para_proposed)
         is_feasible = satisfies_hard_rules(para_proposed)
         redraw_count = 0
         do while (move_kind == 10 .and. .not. is_feasible .and. redraw_count < 200)
@@ -334,7 +370,7 @@ program finv
             prior_current = 1
             prior_proposed = 1
             do i = 1, neq
-                ! E1 is pinned at the epicentre for two or more subevents: its density is a constant
+                ! E1 is pinned at the hypocentre for two or more subevents: its density is a constant
                 ! factor that cancels in the ratio, and where the aftershock map is zero at the epicentre
                 ! it would make every state impossible and freeze all chains at their initial draw
                 if (neq > 1 .and. i == 1) cycle
@@ -441,11 +477,11 @@ contains
     end function
 
     ! one draw from the prior that satisfies every hard rule: positions from the density map,
-    ! depths uniform, centroid times in staggered bins, E1 at the epicentre for two or more subevents
+    ! depths uniform, centroid times in staggered bins, E1 at the hypocentre for two or more subevents
     subroutine draw_initial_model(new_para)
         real, intent(out) :: new_para(max_subevents, 7)
         integer :: attempt, cell, n, nearest, position_draw
-        real :: x_draw, y_draw, duration_deviate, distance(max_subevents), swap(3), separation
+        real :: x_draw, y_draw, duration_deviate, distance(max_subevents), swap(3), separation, rupture_start
         do attempt = 1, 100000
             new_para = 0
             do n = 1, neq
@@ -468,7 +504,7 @@ contains
                 new_para(n, 4) = dura_min + duration_deviate * (min(new_para(n, 7) * 2, dura_max) - dura_min)
             end do
             if (neq > 1) then
-                new_para(1, 1:2) = 0                      ! E1 pinned at the epicentre
+                call place_first_subevent(new_para)      ! E1 pinned at the hypocentre
                 ! label subevents by distance from E1 (nearest first), positions only
                 do n = 2, neq
                     distance(n) = sqrt(sum((new_para(n, 1:3) - new_para(1, 1:3))**2))
@@ -482,13 +518,14 @@ contains
                 end do
                 ! a start farther from E1 than causality allows is unreachable by single moves: delay it,
                 ! or pull it toward E1
+                rupture_start = rupture_start_time(new_para)
                 do n = 2, neq
                     separation = sqrt(sum((new_para(n, 1:3) - new_para(1, 1:3))**2))
-                    if (separation > vmax_cau * (new_para(n, 7) - new_para(1, 7))) then
-                        new_para(n, 7) = min(cen_max, new_para(1, 7) + separation / vmax_cau + 0.2)
-                        if (separation > vmax_cau * (new_para(n, 7) - new_para(1, 7))) then
+                    if (separation > vmax_cau * (new_para(n, 7) - rupture_start)) then
+                        new_para(n, 7) = min(cen_max, rupture_start + separation / vmax_cau + 0.2)
+                        if (separation > vmax_cau * (new_para(n, 7) - rupture_start)) then
                             new_para(n, 1:3) = new_para(1, 1:3) + (new_para(n, 1:3) - new_para(1, 1:3)) &
-                                               * 0.9 * vmax_cau * (new_para(n, 7) - new_para(1, 7)) / separation
+                                               * 0.9 * vmax_cau * (new_para(n, 7) - rupture_start) / separation
                             new_para(n, 3) = max(min(new_para(n, 3), z_max), z_min)
                         end if
                     end if
@@ -529,19 +566,75 @@ contains
     end subroutine
 
     ! the warm subevents plus one subevent drawn from the prior, relabelled in time order; E1 must
-    ! end up at the epicentre for two or more subevents (for a 1-subevent warm model, whose centroid
-    ! is usually off the epicentre, the new subevent is drawn AT the epicentre and has to come first)
+    ! end up at the hypocentre for two or more subevents (for a 1-subevent warm model, whose centroid
+    ! is usually off the epicentre, the new subevent is drawn AT the hypocentre and has to come first).
+    !
+    ! A crowded warm model gets a second kind of draw. The draw from the prior needs a free slot of
+    ! 2 t_gap between two warm subevents, and a model whose pulses follow each other closely has none:
+    ! the new subevent can then only be appended after the last one. Chile's 4-subevent model of
+    ! 2026-11-17 (centroids at 3.6, 6.1, 9.8 and 14.2 s) was such a model. Its 5-subevent search
+    ! started at 0.8716, above the 0.8599 of four subevents, and ended at 0.8714, while one island
+    ! of chains of another seed found five subevents at 0.7819, with the new subevent between the
+    ! second and the third: the first run selected 3 subevents, the second 5. For a warm model
+    ! without a free slot, half of the draws therefore insert the new subevent between two
+    ! consecutive warm subevents (interpolated in time, position and depth, plus a jitter) and move
+    ! the centroid times of the others apart until every gap is t_gap again. From that 4-subevent
+    ! model these draws started at 0.850-0.854 and the 5-subevent searches ended at 0.7795, 0.7801
+    ! and 0.7827 (seeds 0, 1000 and 1500, 32 ranks), every island of chains below 0.786 before the
+    ! last resampling round. In the full reruns the two searches agree within 0.6% at every N and
+    ! both select 4 (0.8124 and 0.8102). A warm model with a free slot is drawn as before, with the
+    ! same random numbers: the 3-subevent California search wrote byte-identical chains
+    ! (PITFALLS D7).
     subroutine draw_warm_start_model(new_para, ok)
         real, intent(out) :: new_para(max_subevents, 7)
         logical, intent(out) :: ok
-        integer :: attempt, n, m, slot, position_draw
-        real :: swap(7), x_draw, y_draw
-        logical :: has_epicentral_subevent
+        integer :: attempt, n, m, slot, position_draw, left
+        real :: swap(7), x_draw, y_draw, inserted(7), fraction, jitter
+        logical :: has_epicentral_subevent, warm_model_is_crowded
         has_epicentral_subevent = any(abs(warm_para(1:warm_subevent_count, 1)) < 1e-3 .and. &
                                       abs(warm_para(1:warm_subevent_count, 2)) < 1e-3)
+        warm_model_is_crowded = has_epicentral_subevent .and. warm_subevent_count >= 2
+        if (warm_model_is_crowded) warm_model_is_crowded = &
+            all(warm_para(2:warm_subevent_count, 7) - warm_para(1:warm_subevent_count - 1, 7) < 2 * t_gap)
         ok = .false.
         do attempt = 1, 20000
             new_para = 0
+            if (warm_model_is_crowded) then
+                if (uniform_deviate(random_state) < 0.5) then
+                    left = min(1 + int(uniform_deviate(random_state) * (warm_subevent_count - 1)), warm_subevent_count - 1)
+                    fraction = uniform_deviate(random_state)
+                    ! jitter: a quarter of the distance a rupture front covers between the two centroid times
+                    jitter = 0.25 * vmax_cau * (warm_para(left + 1, 7) - warm_para(left, 7))
+                    inserted = warm_para(left, :) + fraction * (warm_para(left + 1, :) - warm_para(left, :))
+                    inserted(1) = inserted(1) + (2 * uniform_deviate(random_state) - 1) * jitter
+                    inserted(2) = inserted(2) + (2 * uniform_deviate(random_state) - 1) * jitter
+                    inserted(3) = max(z_min, min(z_max, inserted(3) + (2 * uniform_deviate(random_state) - 1) * jitter))
+                    inserted(4) = dura_min + uniform_deviate(random_state) * (min(inserted(7) * 2, dura_max) - dura_min)
+                    inserted(5) = 0.01
+                    inserted(6) = 0
+                    if (inserted(1) < x_min .or. inserted(1) > x_max .or. inserted(2) < y_min .or. inserted(2) > y_max) cycle
+                    if (uniform_deviate(random_state) >= seismicity_prior(inserted(1), inserted(2), grid_spacing, &
+                                                                          grid_cell_count, grid_x, grid_y, grid_density)) cycle
+                    new_para(1:left, :) = warm_para(1:left, :)
+                    new_para(left + 1, :) = inserted
+                    new_para(left + 2:neq, :) = warm_para(left + 1:warm_subevent_count, :)
+                    do m = left, 1, -1                             ! the earlier subevents move earlier
+                        new_para(m, 7) = min(new_para(m, 7), new_para(m + 1, 7) - t_gap)
+                    end do
+                    do m = left + 2, neq                           ! the later subevents move later
+                        new_para(m, 7) = max(new_para(m, 7), new_para(m - 1, 7) + t_gap)
+                    end do
+                    do m = 1, neq                                  ! no moment before the origin time
+                        new_para(m, 4) = min(new_para(m, 4), 2 * new_para(m, 7))
+                    end do
+                    call place_first_subevent(new_para)
+                    if (satisfies_hard_rules(new_para)) then
+                        ok = .true.
+                        return
+                    end if
+                    cycle
+                end if
+            end if
             new_para(1:warm_subevent_count, :) = warm_para(1:warm_subevent_count, :)
             n = neq
             if (has_epicentral_subevent) then
@@ -570,12 +663,29 @@ contains
                 end do
             end do
             if (neq > 1 .and. (abs(new_para(1, 1)) > 1e-3 .or. abs(new_para(1, 2)) > 1e-3)) cycle
+            call place_first_subevent(new_para)           ! the depth of the new E1, or of an E1 of an older run
             if (satisfies_hard_rules(new_para)) then
                 ok = .true.
                 return
             end if
         end do
     end subroutine
+
+    ! E1 of a model with two or more subevents sits at the hypocentre: at the epicentre and, when the
+    ! data headers carry it, at the hypocentre depth
+    subroutine place_first_subevent(p)
+        real, intent(inout) :: p(max_subevents, 7)
+        if (neq <= 1) return
+        p(1, 1:2) = 0
+        if (first_depth_is_pinned) p(1, 3) = hypocentre_depth
+    end subroutine
+
+    ! the time at which the rupture front leaves the hypocentre: the start of E1's moment rate, half
+    ! a duration before its centroid
+    real function rupture_start_time(p)
+        real, intent(in) :: p(max_subevents, 7)
+        rupture_start_time = p(1, 7) - p(1, 4) / 2
+    end function
 
     ! the hard rules of the prior; the density factor is applied in the acceptance test
     logical function satisfies_hard_rules(p)
@@ -593,7 +703,8 @@ contains
             end if
             if (n >= 2) then                                                       ! rupture causality
                 if (p(n, 7) <= p(1, 7)) return
-                if (sqrt(sum((p(n, 1:3) - p(1, 1:3))**2)) > vmax_cau * (p(n, 7) - p(1, 7))) return
+                ! no centroid ahead of a front that leaves E1 with vmax_cau when E1 starts
+                if (sqrt(sum((p(n, 1:3) - p(1, 1:3))**2)) > vmax_cau * (p(n, 7) - rupture_start_time(p))) return
             end if
             if (n >= 3) then
                 ! each new subevent continues the rupture direction from E(n-1) or lies on the far
@@ -622,7 +733,7 @@ contains
     ! 2-subevent mode, the median chain stayed 17% worse, and the selected N rested on that one chain.
     subroutine propose(move_kind_out, subevent_out)
         integer, intent(out) :: move_kind_out, subevent_out
-        integer :: m, n
+        integer :: m, n, first_movable
         para_proposed = para
         subevent_out = 0
         u = uniform_deviate(random_state)
@@ -662,13 +773,11 @@ contains
             end do
             return
         end if
-        ! single-parameter move of a uniformly chosen subevent (x and y of E1 stay at the epicentre
-        ! for two or more subevents)
-        if (u < 0.4 .and. neq > 1) then
-            n = 2 + min(neq - 2, int(uniform_deviate(random_state) * (neq - 1)))
-        else
-            n = 1 + min(neq - 1, int(uniform_deviate(random_state) * neq))
-        end if
+        ! single-parameter move of a uniformly chosen subevent; x, y and (when the data carry the
+        ! hypocentre depth) the depth of E1 stay at the hypocentre for two or more subevents
+        first_movable = 1
+        if (neq > 1 .and. (u < 0.4 .or. (u < 0.6 .and. first_depth_is_pinned))) first_movable = 2
+        n = first_movable + min(neq - first_movable, int(uniform_deviate(random_state) * (neq - first_movable + 1)))
         subevent_out = n
         if (u < 0.2) then
             move_kind_out = 1

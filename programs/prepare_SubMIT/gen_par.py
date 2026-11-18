@@ -232,6 +232,7 @@ evla= {evla}
 evvp= {vp} #Average Vp near the source depth
 evvs= {vs}  #Average Vs near the source depth
 DCconstrain= 1 #DC constrain: 2-weak, 0.5-strong
+MechanismSigma= 10 # prior standard deviation (deg) of the angle between a subevent's moment tensor and the double couple of the total tensor; 20 = weak, 5 = strong, 0 = off
 bg_localdist= {bg_localdist}  # begining distance for local stations (km)
 nd_localdist= {nd_localdist} # ending distance for local stations (km)
 localdist_interval= {localdist_interval}  # distace interval for local stations (km)

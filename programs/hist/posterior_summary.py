@@ -119,9 +119,10 @@ largest_r_hat = 0.0
 for subevent in range(subevent_count):
     values = []
     for parameter, column in zip(parameter_names, (1, 2, 3, 4, 7)):
-        if subevent_count > 1 and subevent == 0 and parameter in ("x east", "y north"):
-            continue                       # E1 is pinned at the epicentre
-        r_hat = split_r_hat([chains[name][:, 8 * subevent + column] for name in kept_chains])
+        values_of_chains = [chains[name][:, 8 * subevent + column] for name in kept_chains]
+        if np.ptp(np.concatenate(values_of_chains)) < 1e-6:
+            continue                       # not sampled: E1 sits at the hypocentre, epicentre and depth (finv.f90)
+        r_hat = split_r_hat(values_of_chains)
         largest_r_hat = max(largest_r_hat, r_hat) if np.isfinite(r_hat) else largest_r_hat
         values.append(f"{parameter} {r_hat:.2f}")
     report.append(f"  E{subevent + 1}: " + ", ".join(values))

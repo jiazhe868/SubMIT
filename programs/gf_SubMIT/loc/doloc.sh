@@ -56,7 +56,7 @@ if [ "$interval" -lt 1 ]; then
 fi
 
 evdp=$(saclst evdp f  ${invd}/data/*.z | sort -nk2 | head -1| gawk '{print int($2)}')
-# event-adaptive depth aperture (keep in sync with ../dotel.sh): deep
+# event-adaptive depth aperture (../dotel.sh reads the grid from distdep.dat): deep
 # intraslab ruptures scale with the Wells-Coppersmith length; shallow keep 20
 mw=$(gawk -v ev="$nm" '$1==ev{print $4; exit}' ../../event_list.dat)
 halfw=20
@@ -66,6 +66,21 @@ fi
 depth_min=$((evdp - halfw))
 if [ "$depth_min" -lt 3 ]; then
     depth_min=3
+fi
+# The depth grid starts in rock: at least 0.5 km below the water and the soft sediments (Vs < 2.0
+# km/s) of the CRUST1.0 column, the layers that are stripped from the regional model above and kept
+# in the teleseismic one. The grid used to start at 3 km whatever the column held. The 2024
+# California example has 2.75 km of water over 0.63 km of sediment (Vs 0.34 km/s), so its 3-km node
+# was a source in that sediment layer: its teleseismic P Green's functions are 11 (dd) and 29 (ds)
+# times those of the 5-km node and ring for 100 s with a period near 7.5 s, as the water
+# reverberations of the data do (4 x 2.75 km / 1.5 km/s = 7.3 s), which a strike-slip source in rock
+# hardly excites. Every v3 model of that example had its shallow subevents at 3.0-3.1 km, with
+# mechanisms on the 30-degree cone (PITFALLS B5).
+soft_column_km=$(gawk '{ if ($2 < 2.0) soft += $4; else exit } END { printf "%.2f", soft + 0 }' vmodel.txt)
+first_rock_depth=$(gawk -v soft="$soft_column_km" 'BEGIN { depth = int(soft + 0.5); if (depth < soft + 0.5) depth++; print depth }')
+if [ "$depth_min" -lt "$first_rock_depth" ]; then
+    echo "doloc: the depth grid starts at $first_rock_depth km (water and soft sediments: $soft_column_km km)"
+    depth_min=$first_rock_depth
 fi
 depth_max=$((evdp + halfw))
 # NOTE: no Moho cap on the GF grid - megathrust interface events rupture

@@ -15,5 +15,5 @@ vr_max 3.5
 theta_min 0
 theta_max 360
 cen_min 1.5
-cen_max 27
-vmax_cau -1.0
+cen_max 28
+vmax_cau 4.51

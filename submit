@@ -178,8 +178,8 @@ build_gfs() {
     say "Green's functions for $ev (the long preparation stage)"
     rm -rf "gf_$ev"
     cp -r ../programs/gf_SubMIT "gf_$ev"
-    (cd "gf_$ev/loc" && sh doloc.sh > ../doloc.log 2>&1) || die "local Green's functions failed (IRIS/gf_$ev/doloc.log)"
-    (cd "gf_$ev" && sh dotel.sh > dotel.log 2>&1) || die "teleseismic Green's functions failed (IRIS/gf_$ev/dotel.log)"
+    (cd "gf_$ev/loc" && bash doloc.sh > ../doloc.log 2>&1) || die "local Green's functions failed (IRIS/gf_$ev/doloc.log)"
+    (cd "gf_$ev" && bash dotel.sh > dotel.log 2>&1) || die "teleseismic Green's functions failed (IRIS/gf_$ev/dotel.log)"
     find "gf_$ev/greenFuncDir_disp" -maxdepth 2 -name "*.grn.*" -print -quit | grep -q . \
         || die "no Green's functions were produced (see IRIS/gf_$ev/*.log)"
 }

@@ -4,7 +4,8 @@
    functions once. sub_forward_() then turns a set of subevents (centroid time, position, depth,
    duration) into predicted teleseismic P, teleseismic SH and regional three-component seismograms,
    solves the five moment-tensor components of every subevent by damped least squares (with the
-   total-moment-tensor constraint), aligns every trace on the data by cross-correlation and returns
+   total-moment-tensor constraint and a prior that draws every subevent towards the double couple of
+   the total tensor), aligns every trace on the data by cross-correlation and returns
    the penalized misfit that finv.f90 samples (README section 4). ffwd.f90 calls the same function
    once after enable_forward_outputs_() to write the waveforms, moment tensors and per-station
    residuals that the figures and the model-based station screen read.
@@ -37,6 +38,12 @@
      indexed memory outside the trace.
    - The regional zero-fill before the origin time used the depth index instead of the component
      index (harmless only because fresh memory is zero).
+   - The mechanisms of the subevents were free inside a 30 deg cone around the P and T axes of the
+     summed tensor and sat on it: the worst axis was at 26-30 deg in the v3 runs of California,
+     Venezuela and Chile, and California's subevents on the Mendocino transform fault struck 120 and
+     127 deg where the fault strikes 96-100 deg (review of the examples, 2026-11-17). A Gaussian prior on the
+     angle between each subevent's tensor and the double couple of the total tensor now enters the
+     second least-squares solve and the misfit (PITFALLS B4); the cone stays as the hard limit.
 
    Build: make finv / make ffwd (Makefile). Needs SAC's libsac (design, apply) and MPI (node-shared
    Green's functions when SUBMIT_SHM_GF=1 and MPI is running).
@@ -95,6 +102,8 @@ static struct {
     float wave_weight[3];
     float max_shift_seconds[3];
     float tikhonov_alpha, cmt_scaling, dc_constraint;
+    float mechanism_sigma_degrees;            /* prior s.d. of the angle between a subevent's tensor and the reference double couple */
+    double reference_double_couple[5];        /* tensor metric times the unit double couple of the total tensor */
     float total_moment_tensor[5];             /* Mxx Myy Mxy Mxz Myz, 1e27 dyne-cm (totalmt.dat) */
     float epicentre_longitude, epicentre_latitude;
     float source_p_velocity, source_s_velocity;
@@ -174,6 +183,7 @@ static void read_par_file(char *p_station_file, char *sh_station_file, char *reg
         {"maxshftRayl=", &setup.max_shift_seconds[wave_regional], NULL, NULL, -1},
         {"TotalMomentTensor=", NULL, NULL, total_mt_file, -1},
         {"num_subevent=", NULL, &ignored_count, NULL, -1},
+        {"MechanismSigma=", &setup.mechanism_sigma_degrees, NULL, NULL, -1},
     };
     int key_count = sizeof keys / sizeof keys[0], key_index, missing_count = 0, wave;
     char line[1024], name[256], value[512];
@@ -183,6 +193,7 @@ static void read_par_file(char *p_station_file, char *sh_station_file, char *reg
     setup.max_shift_seconds[wave_sh] = 5;
     setup.max_shift_seconds[wave_regional] = 3;
     strcpy(total_mt_file, "totalmt.dat");
+    setup.mechanism_sigma_degrees = 10;        /* default of gen_par.py; 0 switches the prior off */
     for (key_index = 0; key_index < key_count; key_index++) {
         keys[key_index].required = keys[key_index].required == 0;
         keys[key_index].seen = 0;
@@ -459,8 +470,98 @@ static void allocate_and_read_green_functions(const char *prefix, const char *se
    Fortran entry points: initialisation
    ------------------------------------------------------------------------------------------------ */
 
-/* Read everything once. Returns the S velocity at the source (finv's causality cap is a multiple). */
-void sub_init_(float *source_s_velocity) {
+/* ------------------------------------------------------------------------------------------------
+   mechanism prior: the reference double couple
+   ------------------------------------------------------------------------------------------------ */
+
+/* Posterior width of the sampler, sigma_relative of finv.f90 (README 4.5). The mechanism prior
+   needs it to weigh an angle against a change of misfit; tests/test_regressions.py checks that this
+   file, finv.f90 and plot_lcurve.py hold the same value. */
+static const double posterior_sigma = 0.05;
+
+/* Inner product of two moment tensors written as (Mxx, Myy, Mxy, Mxz, Myz) with Mzz = -Mxx - Myy:
+   a' * tensor_metric * b = sum over all nine components of a_jk b_jk. */
+static const double tensor_metric[5][5] = {{2, 1, 0, 0, 0}, {1, 2, 0, 0, 0}, {0, 0, 2, 0, 0}, {0, 0, 0, 2, 0}, {0, 0, 0, 0, 2}};
+
+/* Eigenvalues (ascending) and eigenvectors (columns) of a symmetric 3 x 3 matrix by Jacobi
+   rotations; the matrix is overwritten. */
+static void symmetric_eigen_3x3(double matrix[3][3], double values[3], double vectors[3][3]) {
+    int sweep, p, q, i, j;
+    for (i = 0; i < 3; i++) for (j = 0; j < 3; j++) vectors[i][j] = i == j;
+    for (sweep = 0; sweep < 60; sweep++) {
+        if (fabs(matrix[0][1]) + fabs(matrix[0][2]) + fabs(matrix[1][2]) < 1e-300) break;
+        for (p = 0; p < 2; p++) for (q = p + 1; q < 3; q++) {
+            double theta, tangent, cosine, sine;
+            if (fabs(matrix[p][q]) < 1e-300) continue;
+            theta = (matrix[q][q] - matrix[p][p]) / (2 * matrix[p][q]);
+            tangent = (theta >= 0 ? 1 : -1) / (fabs(theta) + sqrt(theta * theta + 1));
+            cosine = 1 / sqrt(tangent * tangent + 1);
+            sine = tangent * cosine;
+            for (i = 0; i < 3; i++) {
+                double first = matrix[i][p], second = matrix[i][q];
+                matrix[i][p] = cosine * first - sine * second;
+                matrix[i][q] = sine * first + cosine * second;
+            }
+            for (i = 0; i < 3; i++) {
+                double first = matrix[p][i], second = matrix[q][i];
+                matrix[p][i] = cosine * first - sine * second;
+                matrix[q][i] = sine * first + cosine * second;
+            }
+            for (i = 0; i < 3; i++) {
+                double first = vectors[i][p], second = vectors[i][q];
+                vectors[i][p] = cosine * first - sine * second;
+                vectors[i][q] = sine * first + cosine * second;
+            }
+        }
+    }
+    for (i = 0; i < 3; i++) values[i] = matrix[i][i];
+    for (i = 0; i < 2; i++) for (j = i + 1; j < 3; j++) if (values[j] < values[i]) {
+        double swap = values[i];
+        int k;
+        values[i] = values[j]; values[j] = swap;
+        for (k = 0; k < 3; k++) { swap = vectors[k][i]; vectors[k][i] = vectors[k][j]; vectors[k][j] = swap; }
+    }
+}
+
+/* The double couple of the total moment tensor, T T' - P P' with T and P its tension and pressure
+   axes, scaled to unit tensor norm and stored already multiplied by the metric. The double couple is
+   the reference, not the total tensor itself: the total tensor of the Chile example has a CLVD share
+   of 0.30, and pulling every subevent towards it raised the CLVD factor from 1.03 to 1.14. */
+static void set_reference_double_couple(void) {
+    const float *m = setup.total_moment_tensor;                  /* Mxx Myy Mxy Mxz Myz */
+    double tensor[3][3] = {{m[0], m[2], m[3]}, {m[2], m[1], m[4]}, {m[3], m[4], -m[0] - m[1]}};
+    double values[3], axes[3][3], couple[5], norm_squared = 0;
+    int a, b;
+    symmetric_eigen_3x3(tensor, values, axes);                   /* column 0: P axis, column 2: T axis */
+    couple[0] = axes[0][2] * axes[0][2] - axes[0][0] * axes[0][0];
+    couple[1] = axes[1][2] * axes[1][2] - axes[1][0] * axes[1][0];
+    couple[2] = axes[0][2] * axes[1][2] - axes[0][0] * axes[1][0];
+    couple[3] = axes[0][2] * axes[2][2] - axes[0][0] * axes[2][0];
+    couple[4] = axes[1][2] * axes[2][2] - axes[1][0] * axes[2][0];
+    for (a = 0; a < 5; a++) for (b = 0; b < 5; b++) norm_squared += couple[a] * tensor_metric[a][b] * couple[b];
+    for (a = 0; a < 5; a++) {
+        setup.reference_double_couple[a] = 0;
+        for (b = 0; b < 5; b++) setup.reference_double_couple[a] += tensor_metric[a][b] * couple[b] / sqrt(norm_squared);
+    }
+}
+
+/* Angle (degrees, 0-180) between a moment tensor (Mxx, Myy, Mxy, Mxz, Myz) and the reference double
+   couple; 180 is the same fault with the opposite sense of slip. */
+static double angle_from_reference_double_couple(const double *tensor) {
+    double along = 0, norm_squared = 0;
+    int a, b;
+    for (a = 0; a < 5; a++) {
+        along += tensor[a] * setup.reference_double_couple[a];
+        for (b = 0; b < 5; b++) norm_squared += tensor[a] * tensor_metric[a][b] * tensor[b];
+    }
+    if (!(norm_squared > 0)) return 0;
+    return acos(fmax(-1.0, fmin(1.0, along / sqrt(norm_squared)))) * degrees_per_radian;
+}
+
+/* Read everything once. Returns the S velocity at the source (finv's causality cap is a multiple)
+   and the hypocentre depth of the data headers (finv places the first subevent there; negative
+   when the headers carry none). */
+void sub_init_(float *source_s_velocity, float *hypocentre_depth_km) {
     char p_list[256], sh_list[256], regional_list[256], gf_prefix[256], gf_separator[256], gf_suffix[256], total_mt_file[256];
     FILE *total_mt;
     int component;
@@ -473,9 +574,11 @@ void sub_init_(float *source_s_velocity) {
     for (component = 0; component < 5; component++)
         if (fscanf(total_mt, "%f", &setup.total_moment_tensor[component]) != 1) fail("totalmt.dat needs 5 numbers", NULL);
     fclose(total_mt);
+    set_reference_double_couple();
     read_data();
     allocate_and_read_green_functions(gf_prefix, gf_separator, gf_suffix);
     *source_s_velocity = setup.source_s_velocity;
+    *hypocentre_depth_km = setup.hypocentre_depth_km;
 }
 
 void enable_forward_outputs_(void) {
@@ -718,7 +821,7 @@ void sub_forward_(int *subevent_count_pointer, float *model, float *penalized_mi
     float *moment_rate = calloc(setup.stf_npts + 1, sizeof(float));
     int max_npts = npts_p > npts_sh ? npts_p : npts_sh;
     float *work = NULL, *basis[5], *regional_basis[3][5];
-    double normal_matrix[45 * 45], rhs[45], solution[45], moment_tensor[45];
+    double normal_matrix[45 * 45], normal_without_prior[45 * 45], rhs[45], solution[45], moment_tensor[45];
     double data_energy = 0, cmt_weight, moment_cmt;
     double residual_sum[3] = {0, 0, 0}, norm_sum[3] = {0, 0, 0};
     float *trace_correlation = malloc(sizeof(float) * (trace_total > 0 ? trace_total : 1));
@@ -921,11 +1024,49 @@ void sub_forward_(int *subevent_count_pointer, float *model, float *penalized_mi
         for (i = 0; i < unknown_count; i++) if (normal_matrix[i * unknown_count + i] > largest_diagonal) largest_diagonal = normal_matrix[i * unknown_count + i];
         for (i = 0; i < unknown_count; i++) normal_matrix[i * unknown_count + i] += 1e-8 * largest_diagonal;
     }
+    memcpy(normal_without_prior, normal_matrix, sizeof normal_matrix);
     if (!cholesky_factorize(normal_matrix, unknown_count)) goto finish;
 
-    /* --- two linear solves: the second on data aligned with the lags of the first prediction */
+    /* --- two linear solves: the second on data aligned with the lags of the first prediction, and
+       with the mechanism prior. The prior is Gaussian in the angle gamma_i between the tensor of
+       subevent i and the reference double couple, with standard deviation MechanismSigma. The sampler's
+       posterior is exp(-misfit / (2 sigma^2 misfit_ref)), so in the units of the least squares the
+       prior adds sigma^2 * residual_energy / MechanismSigma^2 * sin^2(gamma_i) per subevent, and
+       sin^2(gamma_i) is |part of the tensor orthogonal to the reference|^2 / |tensor|^2: quadratic in
+       the unknowns once the residual energy and the tensor norms are taken from the first solve.
+       Relative to each subevent's own moment, so a small subevent is held as firmly as a large one
+       (a weight relative to the total moment left the smallest subevents on the cone: California
+       Mw 6.2-6.4 of a total of 7.0). Measured on the published California model at fixed times and
+       positions, MechanismSigma 60, 40, 20, 10 raised the data misfit by 0.9, 1.9, 5.4, 13.3%; with
+       the search repeated, 10 deg brought E1 and E2 within 6 deg of the total mechanism at 3.4%
+       higher data misfit, and left a dip of 54-57 deg on the two eastern subevents, which only 5 deg
+       removed, at 17%. */
     for (pass = 0; pass < 2; pass++) {
         const float *right_side_data = pass == 0 ? data_vector : shifted_data;
+        if (pass == 1 && setup.mechanism_sigma_degrees > 0) {
+            const double sigma_radians = setup.mechanism_sigma_degrees / degrees_per_radian;
+            double residual_energy = 0, largest_norm_squared = 0, norm_squared[max_subevents];
+            int a, b;
+            for (row = 0; row < row_count; row++)
+                residual_energy += ((double)data_vector[row] - synthetic[row]) * ((double)data_vector[row] - synthetic[row]);
+            for (subevent = 0; subevent < subevent_count; subevent++) {
+                norm_squared[subevent] = 0;
+                for (a = 0; a < 5; a++) for (b = 0; b < 5; b++)
+                    norm_squared[subevent] += solution[5 * subevent + a] * tensor_metric[a][b] * solution[5 * subevent + b];
+                if (norm_squared[subevent] > largest_norm_squared) largest_norm_squared = norm_squared[subevent];
+            }
+            memcpy(normal_matrix, normal_without_prior, sizeof normal_matrix);
+            for (subevent = 0; subevent < subevent_count; subevent++) {
+                /* a subevent that the first solve left (almost) without moment keeps a finite weight */
+                const double smallest_norm_squared = 1e-4 * largest_norm_squared;
+                const double weight = posterior_sigma * posterior_sigma * residual_energy / (sigma_radians * sigma_radians)
+                                      / (norm_squared[subevent] > smallest_norm_squared ? norm_squared[subevent] : smallest_norm_squared);
+                for (a = 0; a < 5; a++) for (b = 0; b < 5; b++)
+                    normal_matrix[(5 * subevent + a) * unknown_count + 5 * subevent + b] +=
+                        weight * (tensor_metric[a][b] - setup.reference_double_couple[a] * setup.reference_double_couple[b]);
+            }
+            if (!(largest_norm_squared > 0) || !cholesky_factorize(normal_matrix, unknown_count)) goto finish;
+        }
         for (i = 0; i < unknown_count; i++) {
             const float *column_i = design_matrix + (size_t)i * row_count;
             double sum = 0;
@@ -975,10 +1116,15 @@ void sub_forward_(int *subevent_count_pointer, float *model, float *penalized_mi
         norm_sum[wave] += sqrt(data_norm * synthetic_norm);
     }
 
-    /* --- penalties (README section 4.4): moment-weighted CLVD content, and the worst P/T-axis
-       rotation of any subevent from the summed tensor beyond a 30 deg cone. Every subevent counts,
-       however small, so a tiny subevent cannot absorb noise with an opposite mechanism; the 45 deg
-       cone and moment-gated variants were tested in 2026-08 and rejected. */
+    /* --- penalties (README section 4.4): moment-weighted CLVD content; the mechanism prior of the
+       second solve, counted here as the factor exp(sigma^2 * sum of (gamma_i / MechanismSigma)^2), which
+       is the Gaussian prior in the units of the sampled misfit; and the worst P/T-axis rotation of
+       any subevent from the summed tensor beyond a 30 deg cone. Every subevent counts, however
+       small, so a tiny subevent cannot absorb noise with an opposite mechanism; the 45 deg cone and
+       moment-gated variants were tested in 2026-08 and rejected. The cone stays as the hard limit
+       next to the prior: without it, and with the depth grid of the California example moved out of
+       its sediment layer, the search took a subevent of Mw 7.0 with the opposite sense of slip
+       (gamma = 180 deg) under MechanismSigma 20 and 10 (2026-11-17). */
     {
         double scalar_moment[max_subevents], clvd_fraction[max_subevents], strike[max_subevents][2], dip[max_subevents][2], rake[max_subevents][2];
         double total[6] = {0, 0, 0, 0, 0, 0}, total_clvd, total_strike[2], total_dip[2], total_rake[2];
@@ -1005,6 +1151,12 @@ void sub_forward_(int *subevent_count_pointer, float *model, float *penalized_mi
             if (t_angle > worst_t) worst_t = t_angle;
         }
         stress_penalty = (worst_p / 30 - 1 > 0 ? worst_p / 30 - 1 : 0) + (worst_t / 30 - 1 > 0 ? worst_t / 30 - 1 : 0);
+        if (setup.mechanism_sigma_degrees > 0) {
+            for (subevent = 0; subevent < subevent_count; subevent++) {
+                const double angle_in_sigmas = angle_from_reference_double_couple(moment_tensor + 5 * subevent) / setup.mechanism_sigma_degrees;
+                stress_penalty += posterior_sigma * posterior_sigma * angle_in_sigmas * angle_in_sigmas;
+            }
+        }
         data_misfit = (residual_sum[0] + residual_sum[1] + residual_sum[2]) / (norm_sum[0] + norm_sum[1] + norm_sum[2]);
         *penalized_misfit = (float)(data_misfit * exp(weighted_clvd / setup.dc_constraint) * exp(stress_penalty));
         if (!is_finite_float(*penalized_misfit)) *penalized_misfit = 9999.0f;

@@ -53,8 +53,11 @@ while read -r event_name origin_date origin_time magnitude longitude latitude de
     stage "$event_name: Green's functions (the long stage)"
     rm -rf "gf_${event_name}"
     cp -r ../programs/gf_SubMIT "gf_${event_name}"
-    ( cd "gf_${event_name}/loc" && sh doloc.sh ) || { echo "ERROR: regional Green's functions failed for $event_name"; exit 1; }
-    ( cd "gf_${event_name}" && sh dotel.sh ) || { echo "ERROR: teleseismic Green's functions failed for $event_name"; exit 1; }
+    # bash, not sh: both scripts cap their parallel jobs with "jobs -rp", which dash (sh on Debian and
+    # Ubuntu) rejects ("Illegal option -r", 27 to 168 times in every run log until 2026-11-17), so the
+    # cap never held and every depth of the grid was started at once
+    ( cd "gf_${event_name}/loc" && bash doloc.sh ) || { echo "ERROR: regional Green's functions failed for $event_name"; exit 1; }
+    ( cd "gf_${event_name}" && bash dotel.sh ) || { echo "ERROR: teleseismic Green's functions failed for $event_name"; exit 1; }
     # find, not a glob: at wide depth apertures (> 50 depth folders) the glob exceeds ARG_MAX
     find "gf_${event_name}/greenFuncDir_disp" -maxdepth 2 -name "????*.grn.????" -print -quit 2>/dev/null | grep -q . \
         || { echo "ERROR: no teleseismic Green's functions for $event_name (gf_${event_name}/greenFuncDir_disp)"; exit 1; }

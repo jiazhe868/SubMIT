@@ -5,8 +5,10 @@ Rule (README section 4.6, since 2026-11-17): the Akaike information criterion of
     AIC(N) = ln(misfit_N) / sigma^2 + 2 k N,
 where sigma = 0.05 is the width of the posterior that finv.f90 samples (its sigma_relative) and
 k = 10 counts the free parameters of a subevent: five moment-tensor components, centroid time,
-duration, depth, x and y (the pin of the first subevent at the epicentre, for two or more
-subevents, is not counted). Every N whose AIC is within 2 of the lowest is tied with it, and the
+duration, depth, x and y. (The first subevent of two or more has fewer: it sits at the hypocentre,
+so only its centroid time, its duration and its tensor are free. That is the same for every N from
+2 on, so one more subevent adds ten parameters; only the step from one subevent to two is charged
+three more than it adds.) Every N whose AIC is within 2 of the lowest is tied with it, and the
 selection is the smallest of them. In words: a subevent costs 2 k sigma^2 = 5% of misfit (exactly:
 ln(misfit) has to fall by 0.05, a misfit 4.9% lower, to tie with one subevent fewer), and of the
 numbers that the data cannot tell apart the simplest is taken.

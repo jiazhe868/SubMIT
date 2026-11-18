@@ -21,8 +21,9 @@
 # amount, and N = 1 runs again, at most twice (widen_centroid_range_while_on_bound below).
 #
 # Warm start: before N >= 2 runs, the best model of N-1 is copied to warm_start.dat; half of the
-# chains start from it plus one subevent drawn from the prior (finv.f90), and the line after
-# "inversion done" says how many did.
+# chains start from it plus one subevent, drawn from the prior or, when that model leaves no free
+# slot in time, inserted between two of its subevents (finv.f90), and the line after "inversion
+# done" says how many did.
 #
 # History: this replaces step3_do_inversions.sh + step3_do_inversions_tempnsub.sh, which ran each
 # folder through awk system() (killing the driver orphaned the awk, which kept starting mpirun jobs).
@@ -145,8 +146,8 @@ while read -r event_name rest; do
     for subevent_count in $subevent_counts; do
         inversion_dir="inv_${event_name}_${subevent_count}sub"
         [ -d "$inversion_dir" ] || { echo "skipping $inversion_dir (missing)"; continue; }
-        # warm start: half of the chains begin from the best N-1 model plus one subevent drawn from the
-        # prior (finv.f90); each N refines the previous one instead of searching from scratch
+        # warm start: half of the chains begin from the best N-1 model plus one subevent (finv.f90);
+        # each N refines the previous one instead of searching from scratch
         rm -f "$inversion_dir/warm_start.dat"
         previous_best="inv_${event_name}_$((subevent_count - 1))sub/best_model_hybrid.dat"
         [ "$subevent_count" -gt 1 ] && [ -s "$previous_best" ] && cp "$previous_best" "$inversion_dir/warm_start.dat"

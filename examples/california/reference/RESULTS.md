@@ -1,37 +1,38 @@
 # Subevent inversion results: 2024-12-05-mww70-off-coast-of-northern
 
-- Selected subevents: **4** | best misfit **1.4992**
+- Selected subevents: **4** | best misfit **3.7900**
 - Total moment: **Mw 7.04** (catalog Mw 7.0)
 
 ## L-curve (misfit vs subevents)
 ```
 n  best_misfit  reduction_%  delta_aic  chains  chains_within_1%  island_bests
-1       2.3857            -      125.8      32                32  2.3853,2.3857,2.3875,2.3879
-2       1.8898         20.8       52.6      32                25  1.8862,1.8905,1.8923,1.8935
-3       1.6189         14.3       10.7      32                17  1.6261,1.6298,1.6390,1.6590
-4       1.4992          7.4        0.0      32                24  1.5029,1.5982,1.6097,1.6191
-5       1.4271          4.8        0.3      32                 2  1.4952,1.5866,1.6736,1.7213
+1       4.7984            -       34.4      32                32  4.7954,4.8006,4.8011,4.8044
+2       4.2606         11.2        6.8      32                32  4.2541,4.2544,4.2600,4.2614
+3       4.3285         -1.6       33.1      32                23  4.3219,4.3235,4.3255,4.3285
+4       3.7900         12.4        0.0      32                10  3.8367,3.8766,4.3779,4.3811
+5       3.8806         -2.4       29.4      32                 9  3.8862,3.8959,3.9132,3.9170
 misfit components of each best model: penalized = data_misfit x clvd_factor x stress_factor (evaluate_misfit_components.sh)
 n    penalized  data_misfit  clvd_factor  stress_factor  worst_axis_deg  p_misfit  sh_misfit  regional_misfit
-N=1     2.3857       2.3795       1.0026         1.0000             0.1     2.774      1.522            4.211
-N=2     1.8898       1.8084       1.0450         1.0000            29.5     1.834      1.566            2.878
-N=3     1.6189       1.5775       1.0262         1.0000            29.9     1.492      1.444            2.664
-N=4     1.4992       1.4348       1.0449         1.0000            29.8     1.251      1.392            2.670
-N=5     1.4271       1.3398       1.0651         1.0000            29.7     1.130      1.333            3.179
+N=1     4.7984       4.5538       1.0535         1.0002             0.0    16.715      2.583            3.492
+N=2     4.2606       3.4572       1.1864         1.0388            29.4     5.107      2.812            2.735
+N=3     4.3285       3.5007       1.1888         1.0401            29.8     5.208      2.830            2.732
+N=4     3.7900       3.0792       1.1629         1.0584            29.9     3.605      2.820            2.784
+N=5     3.8806       3.1593       1.1591         1.0597            30.0     3.978      2.789            2.773
 selection: AIC = ln(misfit) / sigma^2 + 2 k N, sigma = 0.05, k = 10 parameters per subevent, so a subevent costs 5% of misfit (ln(misfit) has to fall by 0.05, the misfit by 4.9%, to tie); delta_aic = AIC above the lowest; every N with delta_aic below 2 is tied, and the smallest of them is selected
-NOTE: a tie - N=4 (delta_aic 0.0), N=5 (delta_aic 0.3) are equally supported (delta_aic below 2); N=4 is selected as the smallest: report both
 lowest AIC: N=4
 SUGGESTED number of subevents (smallest N with delta_aic below 2): 4
 ```
 
 ## Best model
 
-| # | centroid (s) | X east (km) | Y north (km) | duration (s) | depth (km) | Mw |
-|---|---|---|---|---|---|---|
-| E1 | 5.22 | 0.00 | 0.00 | 3.74 | 3.0 | 6.58 |
-| E2 | 8.45 | 6.47 | 2.45 | 8.05 | 3.0 | 6.87 |
-| E3 | 12.77 | 19.36 | 4.19 | 3.48 | 3.1 | 6.50 |
-| E4 | 15.37 | 47.66 | -13.49 | 5.46 | 16.0 | 6.73 |
+| # | centroid (s) | X east (km) | Y north (km) | duration (s) | depth (km) | Mw | from E1 (km) | speed since E1 began (km/s) | nodal planes (strike/dip/rake) | angle from the total mechanism (deg) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| E1 | 5.16 | 0.00 | 0.00 | 5.27 | 4.0 | 6.20 | 0 | - | 9/82/11 ; 277/79/172 | 15 |
+| E2 | 7.71 | 13.71 | 11.23 | 3.02 | 12.3 | 6.89 | 20 | 3.78 | 192/76/23 ; 96/67/165 | 29 |
+| E3 | 11.92 | 29.31 | 12.61 | 3.07 | 13.5 | 6.83 | 33 | 3.54 | 185/82/-40 ; 282/50/-169 | 33 |
+| E4 | 17.42 | -4.56 | -4.71 | 3.50 | 4.0 | 5.64 | 7 | 0.44 | 281/75/-179 ; 191/89/-15 | 9 |
+
+E1 sits at the hypocentre when there are two or more subevents. The speed is the distance from E1 divided by the time since E1 began (its centroid time minus half its duration); the search caps it (`vmax_cau` in `search_par.file`). The angle is measured between each moment tensor and the double couple of the catalogue tensor; the mechanism prior acts on it (`MechanismSigma` in `Par.file`).
 
 ## Figures
 
@@ -43,15 +44,15 @@ SUGGESTED number of subevents (smallest N with delta_aic below 2): 4
 
 ## Convergence of the chains
 ```
-chains: 32; best misfit 1.4992
-chains whose best is within 1% of the global best: 24
-chains whose best is within 2% of the global best: 32
+chains: 32; best misfit 3.7900
+chains whose best is within 1% of the global best: 10
+chains whose best is within 2% of the global best: 23
 chains whose best is within 5% of the global best: 32
 split R-hat of the gated chains (1 = converged, > 1.1 = chains disagree):
-  E1: centroid time 2.07, duration 1.86, depth 1.23
-  E2: centroid time 1.60, x east 1.35, y north 1.29, duration 1.40, depth 1.13
-  E3: centroid time 1.92, x east 1.87, y north 1.88, duration 1.27, depth 1.04
-  E4: centroid time 1.82, x east 1.37, y north 1.50, duration 1.87, depth 1.55
-largest split R-hat: 2.07
+  E1: centroid time 1.65, duration 1.73
+  E2: centroid time 2.33, x east 2.57, y north 2.09, duration 2.02, depth 2.92
+  E3: centroid time 2.63, x east 2.53, y north 2.03, duration 1.62, depth 3.81
+  E4: centroid time 2.05, x east 4.38, y north 1.45, duration 1.52, depth 3.36
+largest split R-hat: 4.38
 ```
 

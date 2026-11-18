@@ -1,17 +1,16 @@
 n  best_misfit  reduction_%  delta_aic  chains  chains_within_1%  island_bests
-1       2.3857            -      125.8      32                32  2.3853,2.3857,2.3875,2.3879
-2       1.8898         20.8       52.6      32                25  1.8862,1.8905,1.8923,1.8935
-3       1.6189         14.3       10.7      32                17  1.6261,1.6298,1.6390,1.6590
-4       1.4992          7.4        0.0      32                24  1.5029,1.5982,1.6097,1.6191
-5       1.4271          4.8        0.3      32                 2  1.4952,1.5866,1.6736,1.7213
+1       4.7984            -       34.4      32                32  4.7954,4.8006,4.8011,4.8044
+2       4.2606         11.2        6.8      32                32  4.2541,4.2544,4.2600,4.2614
+3       4.3285         -1.6       33.1      32                23  4.3219,4.3235,4.3255,4.3285
+4       3.7900         12.4        0.0      32                10  3.8367,3.8766,4.3779,4.3811
+5       3.8806         -2.4       29.4      32                 9  3.8862,3.8959,3.9132,3.9170
 misfit components of each best model: penalized = data_misfit x clvd_factor x stress_factor (evaluate_misfit_components.sh)
 n    penalized  data_misfit  clvd_factor  stress_factor  worst_axis_deg  p_misfit  sh_misfit  regional_misfit
-N=1     2.3857       2.3795       1.0026         1.0000             0.1     2.774      1.522            4.211
-N=2     1.8898       1.8084       1.0450         1.0000            29.5     1.834      1.566            2.878
-N=3     1.6189       1.5775       1.0262         1.0000            29.9     1.492      1.444            2.664
-N=4     1.4992       1.4348       1.0449         1.0000            29.8     1.251      1.392            2.670
-N=5     1.4271       1.3398       1.0651         1.0000            29.7     1.130      1.333            3.179
+N=1     4.7984       4.5538       1.0535         1.0002             0.0    16.715      2.583            3.492
+N=2     4.2606       3.4572       1.1864         1.0388            29.4     5.107      2.812            2.735
+N=3     4.3285       3.5007       1.1888         1.0401            29.8     5.208      2.830            2.732
+N=4     3.7900       3.0792       1.1629         1.0584            29.9     3.605      2.820            2.784
+N=5     3.8806       3.1593       1.1591         1.0597            30.0     3.978      2.789            2.773
 selection: AIC = ln(misfit) / sigma^2 + 2 k N, sigma = 0.05, k = 10 parameters per subevent, so a subevent costs 5% of misfit (ln(misfit) has to fall by 0.05, the misfit by 4.9%, to tie); delta_aic = AIC above the lowest; every N with delta_aic below 2 is tied, and the smallest of them is selected
-NOTE: a tie - N=4 (delta_aic 0.0), N=5 (delta_aic 0.3) are equally supported (delta_aic below 2); N=4 is selected as the smallest: report both
 lowest AIC: N=4
 SUGGESTED number of subevents (smallest N with delta_aic below 2): 4
